@@ -262,27 +262,27 @@
       }
       .pe-saas-submit:hover { background: #b8e040; transform: translateY(-1px); }
       .pe-saas-watermark {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 12px 16px;
-        margin: 20px auto 10px auto;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        font-size: 0.75rem;
-        color: rgba(148, 163, 184, 0.7);
+        display: block;
+        padding: 0;
+        margin-top: 6px;
+        margin-bottom: 0;
+        font-family: inherit;
+        font-size: 0.74rem;
+        color: rgba(148, 163, 184, 0.65);
         letter-spacing: 0.02em;
         text-align: center;
         user-select: none;
-        width: fit-content;
-        max-width: 90%;
-        z-index: 99;
-        clear: both;
+        opacity: 0.85;
+        transition: opacity 0.2s ease;
+      }
+      .pe-saas-watermark:hover {
+        opacity: 1;
       }
       .pe-saas-watermark a {
         color: #a0c040;
         text-decoration: none;
         font-weight: 500;
-        margin-left: 3px;
+        margin-left: 2px;
         transition: color 0.18s ease;
       }
       .pe-saas-watermark a:hover {
@@ -444,27 +444,55 @@
     document.body.appendChild(modal);
   }
 
-  // --- Watermark ---
+  // --- Watermark (Seamlessly Blends Inside Existing Footer) ---
   function injectWatermark() {
-    if (document.getElementById('pe-saas-watermark')) return;
+    const footer = document.querySelector('footer') || document.getElementById('site-footer');
+    if (!footer) return false;
+
+    if (footer.querySelector('#pe-saas-watermark')) return true;
+
+    // Remove any accidental orphan watermark attached to body
+    const orphan = document.body.querySelector(':scope > #pe-saas-watermark');
+    if (orphan) orphan.remove();
 
     const watermark = document.createElement('div');
     watermark.id = 'pe-saas-watermark';
     watermark.className = 'pe-saas-watermark';
     watermark.innerHTML = `Maintained by <a href="${hostUrl}" target="_blank" rel="noopener noreferrer">Partial Existence Services</a>`;
 
-    const footer = document.querySelector('footer') || document.getElementById('site-footer');
-    if (footer) {
-      footer.appendChild(watermark);
-    } else if (document.body) {
-      document.body.appendChild(watermark);
-    }
+    footer.appendChild(watermark);
+    return true;
+  }
+
+  function startWatermarkWatcher() {
+    if (injectWatermark()) return;
+
+    // React SPA observer: wait for footer to mount
+    const observer = new MutationObserver(() => {
+      if (injectWatermark()) {
+        observer.disconnect();
+      }
+    });
+
+    observer.observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+
+    // Fallback timer
+    let tries = 0;
+    const interval = setInterval(() => {
+      tries++;
+      if (injectWatermark() || tries > 25) {
+        clearInterval(interval);
+      }
+    }, 150);
   }
 
   // --- Init ---
   async function init() {
     injectStyles();
-    injectWatermark();
+    startWatermarkWatcher();
 
     if (currentAuthToken) {
       try {
