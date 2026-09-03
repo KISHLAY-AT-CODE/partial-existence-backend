@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "partial-existence-db"
-database_id = "partial-existence-db"
+database_id = "6fc488d6-4dd9-4902-a9c9-4b0969b7c6c5"
 
 [vars]
 ALLOWED_ORIGINS = "https://kishlay-at-code.github.io,http://localhost:5173,http://127.0.0.1:5173"
