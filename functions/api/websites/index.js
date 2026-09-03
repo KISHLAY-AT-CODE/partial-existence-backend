@@ -1,13 +1,15 @@
 /**
  * Endpoint: /api/websites
  * Methods:
- *   GET  (query registered website configuration & post patterns)
- *   POST (connect a website using only Blog URL & Sample Blog Page URL)
+ *   GET  (list blog owner's registered websites or query specific websiteId)
+ *   POST (submit a website for developer approval and send verification email)
  */
 
 import { getContentDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { isValidSlug } from '../../lib/validation.js';
+import { getAuthenticatedUser } from '../../lib/auth.js';
+import { sendDeveloperVerificationEmail, DEVELOPER_EMAIL } from '../../lib/email.js';
 
 function normalizeUrl(inputUrl) {
   if (!inputUrl || typeof inputUrl !== 'string') return null;
@@ -22,20 +24,11 @@ function normalizeUrl(inputUrl) {
   }
 }
 
-/**
- * Extract blog post routing path pattern from a sample blog page URL
- * e.g., "https://site.com/posts/my-post" -> "/posts/"
- * e.g., "https://site.com/blog/2026/hello" -> "/blog/"
- * e.g., "https://user.github.io/repo/posts/item" -> "/repo/posts/"
- */
 function extractPathPattern(siteUrlObj, postUrlObj) {
   if (!siteUrlObj || !postUrlObj) return '/posts/';
-  
   const postPath = postUrlObj.pathname;
   const segments = postPath.split('/').filter(Boolean);
-
   if (segments.length >= 2) {
-    // Remove the last slug component to get the directory pattern
     segments.pop();
     return '/' + segments.join('/') + '/';
   } else if (segments.length === 1) {
@@ -47,48 +40,48 @@ function extractPathPattern(siteUrlObj, postUrlObj) {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
-  const websiteId =
-    url.searchParams.get('websiteId') ||
-    request.headers.get('x-website-id') ||
-    'partial-existence';
+  const websiteId = url.searchParams.get('websiteId') || request.headers.get('x-website-id');
+  const authUser = await getAuthenticatedUser(request, env);
 
   try {
     const db = await getContentDb(env);
-    const site = await db
-      .prepare(
-        `SELECT website_id as websiteId, name, url, sample_post_url as samplePostUrl,
-                post_path_pattern as postPathPattern, allowed_origins as allowedOrigins,
-                admin_email as adminEmail, created_at as createdAt
-         FROM websites WHERE website_id = ?`
-      )
-      .bind(websiteId)
-      .first();
 
-    if (!site) {
-      return jsonResponse(
-        {
-          websiteId,
-          name: websiteId === 'partial-existence' ? 'Partial Existence' : websiteId,
-          url: '',
-          samplePostUrl: '',
-          postPathPattern: '/posts/',
-          isRegistered: false,
-        },
-        200,
-        request,
-        env
-      );
+    // If querying specific websiteId
+    if (websiteId) {
+      const site = await db
+        .prepare(
+          `SELECT website_id as websiteId, owner_user_id as ownerUserId, name, url,
+                  sample_post_url as samplePostUrl, post_path_pattern as postPathPattern,
+                  allowed_origins as allowedOrigins, admin_email as adminEmail,
+                  status, created_at as createdAt
+           FROM websites WHERE website_id = ?`
+        )
+        .bind(websiteId)
+        .first();
+
+      if (!site) {
+        return jsonResponse({ websiteId, isRegistered: false }, 200, request, env);
+      }
+      return jsonResponse({ ...site, isRegistered: true }, 200, request, env);
     }
 
-    return jsonResponse(
-      {
-        ...site,
-        isRegistered: true,
-      },
-      200,
-      request,
-      env
-    );
+    // If authenticated blog owner requesting their dashboard websites
+    if (authUser) {
+      const results = await db
+        .prepare(
+          `SELECT website_id as websiteId, name, url, sample_post_url as samplePostUrl,
+                  post_path_pattern as postPathPattern, status, created_at as createdAt
+           FROM websites
+           WHERE owner_user_id = ? OR admin_email = ? OR website_id = 'partial-existence'
+           ORDER BY created_at DESC`
+        )
+        .bind(authUser.userId, authUser.email)
+        .all();
+
+      return jsonResponse({ websites: results.results || [] }, 200, request, env);
+    }
+
+    return jsonResponse({ websites: [] }, 200, request, env);
   } catch (err) {
     return errorResponse(`Database error: ${err.message}`, 500, request, env);
   }
@@ -96,6 +89,12 @@ export async function onRequestGet(context) {
 
 export async function onRequestPost(context) {
   const { request, env } = context;
+
+  // Require Blog Owner Authentication to prevent bots
+  const authUser = await getAuthenticatedUser(request, env);
+  if (!authUser) {
+    return errorResponse('Blog owner login required. Please sign in to create or connect a website.', 401, request, env);
+  }
 
   let body = {};
   try {
@@ -108,8 +107,7 @@ export async function onRequestPost(context) {
     url: rawSiteUrl,
     samplePostUrl: rawPostUrl,
     name: rawName,
-    websiteId: customId,
-    adminEmail
+    websiteId: customId
   } = body;
 
   const siteUrlObj = normalizeUrl(rawSiteUrl);
@@ -125,7 +123,6 @@ export async function onRequestPost(context) {
   const siteOrigin = siteUrlObj.origin;
   const postPattern = extractPathPattern(siteUrlObj, samplePostObj);
 
-  // Derive website name and ID
   let websiteName = rawName ? String(rawName).trim() : '';
   if (!websiteName) {
     websiteName = siteUrlObj.hostname.replace('www.', '').split('.')[0];
@@ -139,33 +136,39 @@ export async function onRequestPost(context) {
     websiteId = `${hostSlug}${pathSlug}`.replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 45) || 'blog-' + Date.now();
   }
 
-  const cleanEmail = adminEmail ? String(adminEmail).trim().toLowerCase().slice(0, 120) : null;
+  const verificationToken = 'tok_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
   const now = new Date().toISOString();
+  const initialStatus = (websiteId === 'partial-existence' || authUser.email === DEVELOPER_EMAIL) ? 'approved' : 'pending';
 
   try {
     const db = await getContentDb(env);
 
     await db
       .prepare(
-        `INSERT INTO websites (website_id, name, url, sample_post_url, post_path_pattern, allowed_origins, admin_email, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO websites (website_id, owner_user_id, name, url, sample_post_url, post_path_pattern, allowed_origins, admin_email, status, verification_token, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(website_id) DO UPDATE SET
+           owner_user_id = excluded.owner_user_id,
            name = excluded.name,
            url = excluded.url,
            sample_post_url = excluded.sample_post_url,
            post_path_pattern = excluded.post_path_pattern,
            allowed_origins = excluded.allowed_origins,
            admin_email = excluded.admin_email,
+           verification_token = excluded.verification_token,
            updated_at = excluded.updated_at`
       )
       .bind(
         websiteId,
+        authUser.userId,
         websiteName,
         siteUrlObj.href,
         samplePostObj.href,
         postPattern,
         siteOrigin,
-        cleanEmail,
+        authUser.email,
+        initialStatus,
+        verificationToken,
         now,
         now
       )
@@ -173,23 +176,36 @@ export async function onRequestPost(context) {
 
     const hostUrl = new URL(request.url).origin;
 
+    // Send verification email to the developer (dev.vinyas.one@gmail.com)
+    let emailResult = null;
+    if (initialStatus === 'pending') {
+      emailResult = await sendDeveloperVerificationEmail(env, {
+        websiteId,
+        name: websiteName,
+        blogUrl: siteUrlObj.href,
+        samplePostUrl: samplePostObj.href,
+        ownerEmail: authUser.email,
+        verificationToken,
+        hostUrl
+      });
+    }
+
     return jsonResponse(
       {
         success: true,
-        message: 'Blog successfully connected! Sign-In and Comments sections mapped.',
+        message: initialStatus === 'approved'
+          ? 'Website instantly approved and active!'
+          : `Website submitted for verification. Confirmation email sent to developer (${DEVELOPER_EMAIL}).`,
         website: {
           websiteId,
           name: websiteName,
           blogUrl: siteUrlObj.href,
           samplePostUrl: samplePostObj.href,
-          postPathPattern: postPattern,
-          apiUrl: hostUrl,
+          status: initialStatus,
+          ownerEmail: authUser.email,
         },
-        sections: {
-          signInLocation: 'Site-wide Header & Navigation (Extreme Top-Right on ' + siteUrlObj.origin + ')',
-          interactionsLocation: 'All Blog Pages matching path pattern "' + postPattern + '*" (Likes, Views & Comments)',
-          watermark: 'Subtle "Maintained by Partial Existence Services" at bottom of footer',
-        },
+        developerEmailSentTo: DEVELOPER_EMAIL,
+        verificationDetails: emailResult,
         snippets: {
           embedScript: `<script src="${hostUrl}/embed.js" data-website-id="${websiteId}" async></script>`,
           siteConfig: `export const siteConfig = {\n  apiUrl: '${hostUrl}',\n  websiteId: '${websiteId}',\n};`,

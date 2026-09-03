@@ -519,6 +519,21 @@
   // --- Init ---
   async function init() {
     injectStyles();
+
+    // Check approval status with backend
+    try {
+      const siteRes = await fetch(`${hostUrl}/api/websites?websiteId=${encodeURIComponent(websiteId)}`);
+      if (siteRes.ok) {
+        const siteData = await siteRes.json();
+        if (websiteId !== 'partial-existence' && siteData.status && siteData.status !== 'approved') {
+          console.warn(`[Partial Existence SaaS]: Website "${websiteId}" is pending developer approval (dev.vinyas.one@gmail.com).`);
+          return;
+        }
+      }
+    } catch {
+      // Fallback
+    }
+
     startWatermarkWatcher();
 
     if (currentAuthToken) {

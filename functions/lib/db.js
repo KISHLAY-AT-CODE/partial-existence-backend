@@ -12,12 +12,15 @@ let isAuthSchemaInitialized = false;
 const CONTENT_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS websites (
     website_id TEXT PRIMARY KEY,
+    owner_user_id TEXT,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
     sample_post_url TEXT,
     post_path_pattern TEXT,
     allowed_origins TEXT,
     admin_email TEXT,
+    status TEXT DEFAULT 'pending',
+    verification_token TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );`,
