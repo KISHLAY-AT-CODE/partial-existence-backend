@@ -65,20 +65,31 @@ export async function onRequestGet(context) {
       return jsonResponse({ ...site, isRegistered: true }, 200, request, env);
     }
 
-    // If authenticated blog owner requesting their dashboard websites
+    // If authenticated blog owner or developer
     if (authUser) {
-      const results = await db
-        .prepare(
-          `SELECT website_id as websiteId, name, url, sample_post_url as samplePostUrl,
-                  post_path_pattern as postPathPattern, status, created_at as createdAt
-           FROM websites
-           WHERE owner_user_id = ? OR admin_email = ? OR website_id = 'partial-existence'
-           ORDER BY created_at DESC`
-        )
-        .bind(authUser.userId, authUser.email)
-        .all();
+      let query;
+      let params;
 
-      return jsonResponse({ websites: results.results || [] }, 200, request, env);
+      if (authUser.email === DEVELOPER_EMAIL) {
+        // Developer sees ALL websites with approval actions
+        query = `SELECT website_id as websiteId, owner_user_id as ownerUserId, name, url,
+                        sample_post_url as samplePostUrl, post_path_pattern as postPathPattern,
+                        admin_email as adminEmail, status, verification_token as verificationToken,
+                        created_at as createdAt
+                 FROM websites ORDER BY created_at DESC`;
+        params = [];
+      } else {
+        // Normal owner sees their websites
+        query = `SELECT website_id as websiteId, name, url, sample_post_url as samplePostUrl,
+                        post_path_pattern as postPathPattern, status, created_at as createdAt
+                 FROM websites
+                 WHERE owner_user_id = ? OR admin_email = ? OR website_id = 'partial-existence'
+                 ORDER BY created_at DESC`;
+        params = [authUser.userId, authUser.email];
+      }
+
+      const results = await db.prepare(query).bind(...params).all();
+      return jsonResponse({ websites: results.results || [], isDeveloper: authUser.email === DEVELOPER_EMAIL }, 200, request, env);
     }
 
     return jsonResponse({ websites: [] }, 200, request, env);

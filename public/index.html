@@ -589,31 +589,77 @@
           return;
         }
 
-        list.innerHTML = websites.map(site => `
-          <div class="site-item">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <strong style="color: #ffffff; font-size: 0.95rem;">${site.name}</strong>
-              <span class="status-pill status-pill--${site.status || 'pending'}">
-                ${site.status === 'approved' ? '✓ Approved' : site.status === 'rejected' ? '✗ Rejected' : '⏳ Pending Review'}
-              </span>
-            </div>
-            <div style="font-size: 0.78rem; color: var(--text-muted); word-break: break-all;">
-              <div><strong>Domain:</strong> ${site.url}</div>
-              <div><strong>Website ID:</strong> <code style="color: #6ee7b7;">${site.websiteId}</code></div>
-            </div>
-            ${site.status === 'approved' ? `
-              <div class="code-box" style="margin-top: 4px; font-size: 0.72rem;">
-                <code>&lt;script src="${API_BASE}/embed.js" data-website-id="${site.websiteId}" async&gt;&lt;/script&gt;</code>
+        const isDev = Boolean(data.isDeveloper || (currentUser && currentUser.email === 'dev.vinyas.one@gmail.com'));
+
+        list.innerHTML = `
+          ${isDev ? '<div class="alert alert--info" style="margin-bottom: 6px;">👑 <strong>Developer Admin Panel:</strong> Reviewing all submitted blog connections in real-time.</div>' : ''}
+          ${websites.map(site => `
+            <div class="site-item">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <strong style="color: #ffffff; font-size: 0.95rem;">${site.name}</strong>
+                <span class="status-pill status-pill--${site.status || 'pending'}">
+                  ${site.status === 'approved' ? '✓ Approved' : site.status === 'rejected' ? '✗ Rejected' : '⏳ Pending Review'}
+                </span>
               </div>
-            ` : `
-              <div style="font-size: 0.72rem; color: var(--warning); margin-top: 2px;">
-                Awaiting approval by developer (dev.vinyas.one@gmail.com)
+              <div style="font-size: 0.78rem; color: var(--text-muted); word-break: break-all;">
+                <div><strong>Domain:</strong> ${site.url}</div>
+                <div><strong>Website ID:</strong> <code style="color: #6ee7b7;">${site.websiteId}</code></div>
+                ${site.adminEmail ? `<div><strong>Owner:</strong> ${site.adminEmail}</div>` : ''}
               </div>
-            `}
-          </div>
-        `).join('');
+
+              ${site.status === 'approved' ? `
+                <div class="code-box" style="margin-top: 4px; font-size: 0.72rem;">
+                  <code>&lt;script src="${API_BASE}/embed.js" data-website-id="${site.websiteId}" async&gt;&lt;/script&gt;</code>
+                </div>
+              ` : `
+                <div style="font-size: 0.72rem; color: var(--warning); margin-top: 2px;">
+                  Awaiting approval by developer (dev.vinyas.one@gmail.com)
+                </div>
+              `}
+
+              ${isDev ? `
+                <div style="display: flex; gap: 8px; margin-top: 8px; border-top: 1px solid var(--card-border); padding-top: 8px;">
+                  <button class="btn" style="padding: 5px 12px; font-size: 0.76rem;" onclick="handleDeveloperReview('${site.websiteId}', 'approve')">
+                    ✓ Confirm & Approve
+                  </button>
+                  <button class="btn btn--secondary" style="padding: 5px 12px; font-size: 0.76rem; color: var(--danger); border-color: rgba(239,68,68,0.3);" onclick="handleDeveloperReview('${site.websiteId}', 'reject')">
+                    ✗ Reject
+                  </button>
+                  <a href="${API_BASE}/api/admin/review?action=approve&websiteId=${site.websiteId}" target="_blank" style="font-size: 0.72rem; color: var(--text-muted); align-self: center; margin-left: auto;">
+                    Direct Link ↗
+                  </a>
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        `;
       } catch (err) {
         list.innerHTML = `<p style="font-size: 0.85rem; color: var(--danger);">Failed to load registered websites.</p>`;
+      }
+    }
+
+    async function handleDeveloperReview(websiteId, action) {
+      if (!confirm(`Are you sure you want to ${action.toUpperCase()} website "${websiteId}"?`)) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/review`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`
+          },
+          body: JSON.stringify({ websiteId, action })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert(`Website "${websiteId}" marked as ${data.status}!`);
+          loadWebsites();
+        } else {
+          alert(`Review Error: ${data.error || 'Failed to review website'}`);
+        }
+      } catch (err) {
+        alert(`Network Error: ${err.message}`);
       }
     }
 

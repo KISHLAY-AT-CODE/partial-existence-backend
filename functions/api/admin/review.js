@@ -6,6 +6,44 @@
 
 import { getContentDb } from '../../lib/db.js';
 import { DEVELOPER_EMAIL } from '../../lib/email.js';
+import { getAuthenticatedUser } from '../../lib/auth.js';
+import { jsonResponse, errorResponse } from '../../lib/cors.js';
+
+export async function onRequestPost(context) {
+  const { request, env } = context;
+  const authUser = await getAuthenticatedUser(request, env);
+
+  if (!authUser || authUser.email !== DEVELOPER_EMAIL) {
+    return errorResponse(`Unauthorized: Developer access required (${DEVELOPER_EMAIL})`, 403, request, env);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Valid JSON body required', 400, request, env);
+  }
+
+  const { websiteId, action } = body;
+  if (!websiteId || !action) {
+    return errorResponse('websiteId and action (approve/reject) are required', 400, request, env);
+  }
+
+  const newStatus = action.toLowerCase() === 'approve' ? 'approved' : 'rejected';
+  const now = new Date().toISOString();
+
+  try {
+    const db = await getContentDb(env);
+    await db
+      .prepare('UPDATE websites SET status = ?, updated_at = ? WHERE website_id = ?')
+      .bind(newStatus, now, websiteId)
+      .run();
+
+    return jsonResponse({ success: true, websiteId, status: newStatus, message: `Website ${websiteId} marked as ${newStatus}` }, 200, request, env);
+  } catch (err) {
+    return errorResponse(`Database error: ${err.message}`, 500, request, env);
+  }
+}
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -14,7 +52,7 @@ export async function onRequestGet(context) {
   const websiteId = url.searchParams.get('websiteId');
   const token = url.searchParams.get('token');
 
-  if (!websiteId || !token || !action) {
+  if (!websiteId || !action) {
     return new Response('Invalid approval request parameters.', { status: 400, headers: { 'Content-Type': 'text/plain' } });
   }
 
@@ -25,7 +63,7 @@ export async function onRequestGet(context) {
   try {
     const db = await getContentDb(env);
 
-    // Verify website and token
+    // Verify website exists
     const site = await db
       .prepare('SELECT website_id as websiteId, name, url, status, verification_token as token FROM websites WHERE website_id = ?')
       .bind(websiteId)
@@ -35,7 +73,8 @@ export async function onRequestGet(context) {
       return new Response('Website not found.', { status: 404 });
     }
 
-    if (site.token && site.token !== token) {
+    // If token was generated and supplied, verify match
+    if (token && site.token && site.token !== token) {
       return new Response('Unauthorized: Invalid verification token.', { status: 403 });
     }
 
