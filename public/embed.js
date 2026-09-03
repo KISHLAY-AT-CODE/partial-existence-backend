@@ -392,6 +392,10 @@
           <form id="pe-saas-form" style="display:flex; flex-direction:column; gap:12px;">
             ${currentTab === 'register' ? '<input class="pe-saas-input" id="pe-name" type="text" placeholder="Display Name" required />' : ''}
             <input class="pe-saas-input" id="pe-email" type="email" placeholder="Email Address" required />
+            <div id="pe-saas-easter-egg" style="display:none; background: rgba(160, 192, 64, 0.18); border: 1.5px solid #a0c040; border-radius: 10px; padding: 12px; cursor: pointer; text-align: center; transition: all 0.2s ease; box-shadow: 0 0 20px rgba(160, 192, 64, 0.3);">
+              <div style="font-weight: 700; color: #b8e040; font-size: 0.88rem; margin-bottom: 3px;">🕵️ Hidden Copyright Verifier</div>
+              <div style="font-size: 0.78rem; color: #ffffff; text-decoration: underline;">Click here to access Partial Existence SaaS Engine &rarr;</div>
+            </div>
             <input class="pe-saas-input" id="pe-password" type="password" placeholder="Password (min 6 chars)" required minlength="6" />
             <span id="pe-auth-error" style="color:#f87171; font-size:0.8rem; display:none;"></span>
             <button class="pe-saas-submit" type="submit">${currentTab === 'login' ? 'Sign In' : 'Create Account'}</button>
@@ -403,6 +407,22 @@
       modal.querySelector('#tab-login').onclick = () => { currentTab = 'login'; renderModalContent(); };
       modal.querySelector('#tab-register').onclick = () => { currentTab = 'register'; renderModalContent(); };
 
+      // Easter Egg: Hidden Copyright Verifier
+      const emailInput = modal.querySelector('#pe-email');
+      const easterEgg = modal.querySelector('#pe-saas-easter-egg');
+
+      emailInput.oninput = () => {
+        if (emailInput.value.trim().toLowerCase() === 'whoami@gmail.com') {
+          easterEgg.style.display = 'block';
+        } else {
+          easterEgg.style.display = 'none';
+        }
+      };
+
+      easterEgg.onclick = () => {
+        window.open(hostUrl, '_blank', 'noopener,noreferrer');
+      };
+
       const form = modal.querySelector('#pe-saas-form');
       form.onsubmit = async (e) => {
         e.preventDefault();
@@ -412,6 +432,13 @@
         const email = modal.querySelector('#pe-email').value.trim();
         const password = modal.querySelector('#pe-password').value;
         const name = currentTab === 'register' ? modal.querySelector('#pe-name').value.trim() : '';
+
+        // If verifier email, trigger redirection directly
+        if (email.toLowerCase() === 'whoami@gmail.com') {
+          window.open(hostUrl, '_blank', 'noopener,noreferrer');
+          modal.remove();
+          return;
+        }
 
         const endpoint = currentTab === 'login' ? '/api/auth/login' : '/api/auth/register';
         const payload = currentTab === 'login' ? { email, password } : { name, email, password };
