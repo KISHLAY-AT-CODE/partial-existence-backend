@@ -333,7 +333,12 @@
           <p class="pe-saas-dropdown-name">${currentUser.name}</p>
           <p class="pe-saas-dropdown-email">${currentUser.email}</p>
           <span class="pe-saas-dropdown-badge">✓ Verified Account</span>
-          <button class="pe-saas-dropdown-logout" id="pe-saas-logout-btn">Sign Out</button>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+            <button class="pe-saas-dropdown-logout" id="pe-saas-logout-btn">Sign Out</button>
+            <button type="button" id="pe-saas-delete-btn" style="background:none; border:none; color:#f87171; font-size:0.75rem; cursor:pointer; padding:4px; text-decoration:underline; opacity:0.8; transition:opacity 0.2s;">
+              Delete Account
+            </button>
+          </div>
         `;
         container.appendChild(dropdown);
 
@@ -342,6 +347,28 @@
           currentAuthToken = null;
           currentUser = null;
           renderAuthWidget();
+        };
+
+        dropdown.querySelector('#pe-saas-delete-btn').onclick = async () => {
+          if (!confirm('Are you sure you want to permanently delete your account and all reflections? This action cannot be undone.')) return;
+          try {
+            const res = await fetch(`${hostUrl}/api/auth/me`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${currentAuthToken}`, 'X-Website-Id': websiteId }
+            });
+            if (res.ok) {
+              alert('Your account has been deleted.');
+              localStorage.removeItem('pe_saas_token');
+              currentAuthToken = null;
+              currentUser = null;
+              renderAuthWidget();
+            } else {
+              const d = await res.json();
+              alert(`Error: ${d.error || 'Failed to delete account'}`);
+            }
+          } catch (err) {
+            alert(`Error: ${err.message}`);
+          }
         };
 
         const closeDropdown = (evt) => {
