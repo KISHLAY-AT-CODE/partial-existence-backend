@@ -14,6 +14,8 @@ const CONTENT_STATEMENTS = [
     website_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     url TEXT NOT NULL,
+    sample_post_url TEXT,
+    post_path_pattern TEXT,
     allowed_origins TEXT,
     admin_email TEXT,
     created_at TEXT NOT NULL,

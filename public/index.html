@@ -384,51 +384,54 @@
     <!-- Main Grid -->
     <main class="grid">
       
-      <!-- Card 1: Connect Your Blog -->
+      <!-- Card 1: Connect Your Blog via URLs -->
       <section class="card" id="connect-section">
         <div class="card__header">
           <div>
-            <h2 class="card__title">🔌 Connect Your Website</h2>
-            <p class="card__subtitle">Register your blog to generate your instant API snippet</p>
+            <h2 class="card__title">🔌 Connect Your Blog</h2>
+            <p class="card__subtitle">Provide your blog URL & sample post URL to auto-map Sign-In and Comments</p>
           </div>
         </div>
 
         <form id="connect-form" onsubmit="handleConnectWebsite(event)" style="display: flex; flex-direction: column; gap: 14px;">
           <div class="form-group">
-            <label class="form-label" for="site-name">Website / Blog Name</label>
-            <input class="form-input" id="site-name" type="text" placeholder="e.g. My Personal Journal" required />
+            <label class="form-label" for="site-url">1. Blog Website URL (for Sign In / Auth Placement)</label>
+            <input class="form-input" id="site-url" type="url" placeholder="e.g. https://kishlay-at-code.github.io/partial-existence/" required />
+            <span style="font-size: 0.74rem; color: var(--text-muted);">Root website where the top-right Sign In & User Profile bar will be placed</span>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="site-url">Website URL (Domain)</label>
-            <input class="form-input" id="site-url" type="url" placeholder="e.g. https://my-awesome-blog.com" required />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="site-id">Custom Website ID (Optional Slug)</label>
-            <input class="form-input" id="site-id" type="text" placeholder="e.g. my-awesome-blog" />
+            <label class="form-label" for="sample-post-url">2. Sample Blog Page URL (for Comments & Likes Placement)</label>
+            <input class="form-input" id="sample-post-url" type="url" placeholder="e.g. https://kishlay-at-code.github.io/partial-existence/posts/mushishi-review" required />
+            <span style="font-size: 0.74rem; color: var(--text-muted);">Any sample post URL used to auto-detect post paths and place Like, View & Comment widgets</span>
           </div>
 
           <button class="btn" id="connect-btn" type="submit">
-            Connect & Generate Snippet &rarr;
+            Connect & Auto-Map Sections &rarr;
           </button>
         </form>
 
-        <div id="connect-result" style="display: none; flex-direction: column; gap: 12px;">
+        <div id="connect-result" style="display: none; flex-direction: column; gap: 14px; margin-top: 8px;">
           <div class="alert alert--success" id="connect-alert">
-            Website registered successfully!
+            Website registered & sections mapped!
           </div>
 
-          <label class="form-label">1. Add to your <code>site.config.js</code>:</label>
-          <div class="code-box">
-            <button class="copy-btn" onclick="copySnippet('config-snippet')">Copy</button>
-            <code id="config-snippet"></code>
+          <div style="background: rgba(0,0,0,0.35); padding: 12px; border-radius: 8px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 6px;">
+            <div>🔐 <strong>Sign In Section:</strong> <span id="res-signin" style="color: var(--accent);">Top-Right Header (Site-wide)</span></div>
+            <div>💬 <strong>Comments & Likes Section:</strong> <span id="res-interactions" style="color: var(--accent);">Auto-mounted on all matching blog post pages</span></div>
+            <div>🏷️ <strong>Watermark:</strong> <span style="color: var(--text-muted);">"Maintained by Partial Existence Services"</span></div>
           </div>
 
-          <label class="form-label">2. Or embed via HTML Script:</label>
+          <label class="form-label">Single-line Embed Script (Paste before <code>&lt;/body&gt;</code>):</label>
           <div class="code-box">
             <button class="copy-btn" onclick="copySnippet('script-snippet')">Copy</button>
             <code id="script-snippet"></code>
+          </div>
+
+          <label class="form-label">Or React Config (<code>site.config.js</code>):</label>
+          <div class="code-box">
+            <button class="copy-btn" onclick="copySnippet('config-snippet')">Copy</button>
+            <code id="config-snippet"></code>
           </div>
         </div>
       </section>
@@ -582,24 +585,25 @@
       e.preventDefault();
       const btn = document.getElementById('connect-btn');
       btn.disabled = true;
-      btn.innerText = 'Connecting...';
+      btn.innerText = 'Connecting & Mapping...';
 
-      const name = document.getElementById('site-name').value;
-      const url = document.getElementById('site-url').value;
-      const customId = document.getElementById('site-id').value;
+      const url = document.getElementById('site-url').value.trim();
+      const samplePostUrl = document.getElementById('sample-post-url').value.trim();
 
       try {
         const res = await fetch(`${API_BASE}/api/websites`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, url, websiteId: customId })
+          body: JSON.stringify({ url, samplePostUrl })
         });
 
         const data = await res.json();
         if (res.ok && data.success) {
           document.getElementById('connect-result').style.display = 'flex';
+          document.getElementById('script-snippet').innerText = data.snippets.embedScript;
           document.getElementById('config-snippet').innerText = data.snippets.siteConfig;
-          document.getElementById('script-snippet').innerText = data.snippets.scriptTag;
+          document.getElementById('res-signin').innerText = data.sections.signInLocation;
+          document.getElementById('res-interactions').innerText = data.sections.interactionsLocation;
           document.getElementById('connect-alert').innerText = `✅ Connected "${data.website.name}"! Website ID: ${data.website.websiteId}`;
         } else {
           alert(`Error: ${data.error || 'Failed to connect website'}`);
@@ -608,7 +612,7 @@
         alert(`Network Error: ${err.message}`);
       } finally {
         btn.disabled = false;
-        btn.innerText = 'Connect & Generate Snippet →';
+        btn.innerText = 'Connect & Auto-Map Sections →';
       }
     }
 
