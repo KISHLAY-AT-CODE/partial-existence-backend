@@ -1,10 +1,10 @@
 /**
  * Endpoint: /api/pageviews
  * Methods: GET (query view count), POST (record a unique pageview per device)
- * Multi-tenant SaaS with device deduplication.
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../lib/mongodb.js';
+import { getDb } from '../lib/db.js';
 import { jsonResponse, errorResponse } from '../lib/cors.js';
 import { isValidSlug } from '../lib/validation.js';
 
@@ -23,13 +23,13 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const col = await getCollection('websites', env);
-    const websiteDoc = await col.findOne(
-      { websiteId },
-      { projection: { [`posts.${slug}.views`]: 1 } }
-    );
+    const db = await getDb(env);
+    const row = await db
+      .prepare('SELECT views FROM posts WHERE website_id = ? AND slug = ?')
+      .bind(websiteId, slug)
+      .first();
 
-    const views = websiteDoc?.posts?.[slug]?.views || 0;
+    const views = row ? Number(row.views || 0) : 0;
 
     return jsonResponse(
       {
@@ -76,43 +76,41 @@ export async function onRequestPost(context) {
   }
 
   try {
-    const col = await getCollection('websites', env);
-    const now = new Date();
+    const db = await getDb(env);
+    const now = new Date().toISOString();
 
-    // Check if device already viewed this post to prevent redundant view increments
-    const existingDoc = await col.findOne(
-      { websiteId },
-      { projection: { [`posts.${slug}.viewers`]: 1, [`posts.${slug}.views`]: 1 } }
-    );
+    // Check if device already viewed this post
+    const viewer = await db
+      .prepare('SELECT device_id FROM viewers WHERE website_id = ? AND slug = ? AND device_id = ?')
+      .bind(websiteId, slug, deviceId)
+      .first();
 
-    const currentPost = existingDoc?.posts?.[slug];
-    const viewers = currentPost?.viewers || [];
-    const hasViewed = viewers.includes(deviceId);
-
-    let updatedViews = currentPost?.views || 0;
+    const hasViewed = Boolean(viewer);
 
     if (!hasViewed) {
-      const result = await col.findOneAndUpdate(
-        { websiteId },
-        {
-          $inc: { [`posts.${slug}.views`]: 1 },
-          $addToSet: { [`posts.${slug}.viewers`]: deviceId },
-          $set: {
-            updatedAt: now,
-            [`posts.${slug}.slug`]: slug,
-            [`posts.${slug}.updatedAt`]: now,
-          },
-          $setOnInsert: {
-            websiteId,
-            createdAt: now,
-          },
-        },
-        { upsert: true, returnDocument: 'after' }
-      );
-
-      const doc = result?.value || result;
-      updatedViews = doc?.posts?.[slug]?.views || 1;
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO posts (website_id, slug, views, likes, created_at, updated_at)
+             VALUES (?, ?, 1, 0, ?, ?)
+             ON CONFLICT(website_id, slug) DO UPDATE SET views = views + 1, updated_at = ?`
+          )
+          .bind(websiteId, slug, now, now, now),
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO viewers (website_id, slug, device_id, viewed_at)
+             VALUES (?, ?, ?, ?)`
+          )
+          .bind(websiteId, slug, deviceId, now),
+      ]);
     }
+
+    const post = await db
+      .prepare('SELECT views FROM posts WHERE website_id = ? AND slug = ?')
+      .bind(websiteId, slug)
+      .first();
+
+    const updatedViews = post ? Number(post.views || 0) : 1;
 
     return jsonResponse(
       {

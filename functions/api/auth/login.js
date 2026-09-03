@@ -1,9 +1,10 @@
 /**
  * Endpoint: POST /api/auth/login
  * User Sign In for the SaaS platform
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../../lib/mongodb.js';
+import { getDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { verifyPassword, createAuthToken } from '../../lib/auth.js';
 
@@ -17,7 +18,7 @@ export async function onRequestPost(context) {
     return errorResponse('Invalid JSON body', 400, request, env);
   }
 
-  const { email, password, websiteId = 'partial-existence' } = body;
+  const { email, password } = body;
 
   if (!email || !password) {
     return errorResponse('Email and password are required', 400, request, env);
@@ -26,8 +27,14 @@ export async function onRequestPost(context) {
   const cleanEmail = email.trim().toLowerCase();
 
   try {
-    const usersCol = await getCollection('users', env);
-    const user = await usersCol.findOne({ email: cleanEmail });
+    const db = await getDb(env);
+    const user = await db
+      .prepare(
+        `SELECT user_id as userId, name, email, password_hash as passwordHash, created_at as createdAt
+         FROM users WHERE email = ?`
+      )
+      .bind(cleanEmail)
+      .first();
 
     if (!user) {
       return errorResponse('Invalid email or password', 401, request, env);
@@ -36,11 +43,6 @@ export async function onRequestPost(context) {
     const passwordValid = await verifyPassword(password, user.passwordHash);
     if (!passwordValid) {
       return errorResponse('Invalid email or password', 401, request, env);
-    }
-
-    // Associate website with user if not already present
-    if (websiteId && Array.isArray(user.websites) && !user.websites.includes(websiteId)) {
-      await usersCol.updateOne({ userId: user.userId }, { $addToSet: { websites: websiteId } });
     }
 
     const token = await createAuthToken(
@@ -52,7 +54,7 @@ export async function onRequestPost(context) {
       id: user.userId,
       name: user.name,
       email: user.email,
-      createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
+      createdAt: user.createdAt,
     };
 
     const res = jsonResponse(

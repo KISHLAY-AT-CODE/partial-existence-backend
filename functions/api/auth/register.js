@@ -1,9 +1,10 @@
 /**
  * Endpoint: POST /api/auth/register
- * Register a new user in the SaaS platform
+ * Register a new user in the platform
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../../lib/mongodb.js';
+import { getDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { hashPassword, createAuthToken } from '../../lib/auth.js';
 
@@ -37,29 +38,28 @@ export async function onRequestPost(context) {
   const cleanEmail = email.trim().toLowerCase();
 
   try {
-    const usersCol = await getCollection('users', env);
-    await usersCol.createIndex({ email: 1 }, { unique: true });
+    const db = await getDb(env);
 
-    const existingUser = await usersCol.findOne({ email: cleanEmail });
+    const existingUser = await db
+      .prepare('SELECT user_id FROM users WHERE email = ?')
+      .bind(cleanEmail)
+      .first();
+
     if (existingUser) {
       return errorResponse('An account with this email already exists. Please sign in.', 409, request, env);
     }
 
     const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const passwordHash = await hashPassword(password);
-    const now = new Date();
+    const now = new Date().toISOString();
 
-    const userDoc = {
-      userId,
-      name: cleanName,
-      email: cleanEmail,
-      passwordHash,
-      websites: [websiteId],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await usersCol.insertOne(userDoc);
+    await db
+      .prepare(
+        `INSERT INTO users (user_id, name, email, password_hash, website_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(userId, cleanName, cleanEmail, passwordHash, websiteId, now, now)
+      .run();
 
     // Create session token
     const token = await createAuthToken(
@@ -71,7 +71,7 @@ export async function onRequestPost(context) {
       id: userId,
       name: cleanName,
       email: cleanEmail,
-      createdAt: now.toISOString(),
+      createdAt: now,
     };
 
     const res = jsonResponse(

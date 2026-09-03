@@ -1,10 +1,10 @@
 /**
  * Endpoint: /api/likes
  * Methods: GET (query like count), POST (like or unlike a post)
- * Multi-tenant SaaS with device/user tracking.
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../lib/mongodb.js';
+import { getDb } from '../lib/db.js';
 import { jsonResponse, errorResponse } from '../lib/cors.js';
 import { isValidSlug } from '../lib/validation.js';
 
@@ -23,13 +23,13 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const col = await getCollection('websites', env);
-    const websiteDoc = await col.findOne(
-      { websiteId },
-      { projection: { [`posts.${slug}.likes`]: 1 } }
-    );
+    const db = await getDb(env);
+    const row = await db
+      .prepare('SELECT likes FROM posts WHERE website_id = ? AND slug = ?')
+      .bind(websiteId, slug)
+      .first();
 
-    const likes = Math.max(0, websiteDoc?.posts?.[slug]?.likes || 0);
+    const likes = row ? Math.max(0, Number(row.likes || 0)) : 0;
 
     return jsonResponse(
       {
@@ -75,59 +75,49 @@ export async function onRequestPost(context) {
   }
 
   const isUnlike = action === 'unlike' || action === 'decrement' || body.liked === false;
-  const incrementValue = isUnlike ? -1 : 1;
+  const now = new Date().toISOString();
 
   try {
-    const col = await getCollection('websites', env);
+    const db = await getDb(env);
 
     if (isUnlike) {
-      const existingDoc = await col.findOne(
-        { websiteId },
-        { projection: { [`posts.${slug}.likes`]: 1 } }
-      );
-      const currentLikes = existingDoc?.posts?.[slug]?.likes || 0;
-      if (currentLikes <= 0) {
-        return jsonResponse({ success: true, websiteId, slug, likes: 0 }, 200, request, env);
-      }
+      await db.batch([
+        db
+          .prepare(
+            `UPDATE posts SET likes = MAX(0, likes - 1), updated_at = ?
+             WHERE website_id = ? AND slug = ?`
+          )
+          .bind(now, websiteId, slug),
+        db
+          .prepare(
+            `DELETE FROM likers WHERE website_id = ? AND slug = ? AND device_id = ?`
+          )
+          .bind(websiteId, slug, deviceId),
+      ]);
+    } else {
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO posts (website_id, slug, views, likes, created_at, updated_at)
+             VALUES (?, ?, 0, 1, ?, ?)
+             ON CONFLICT(website_id, slug) DO UPDATE SET likes = likes + 1, updated_at = ?`
+          )
+          .bind(websiteId, slug, now, now, now),
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO likers (website_id, slug, device_id, liked_at)
+             VALUES (?, ?, ?, ?)`
+          )
+          .bind(websiteId, slug, deviceId, now),
+      ]);
     }
 
-    const now = new Date();
-    const updateOp = isUnlike
-      ? {
-          $inc: { [`posts.${slug}.likes`]: incrementValue },
-          $pull: { [`posts.${slug}.likers`]: deviceId },
-          $set: {
-            updatedAt: now,
-            [`posts.${slug}.slug`]: slug,
-            [`posts.${slug}.updatedAt`]: now,
-          },
-          $setOnInsert: {
-            websiteId,
-            createdAt: now,
-          },
-        }
-      : {
-          $inc: { [`posts.${slug}.likes`]: incrementValue },
-          $addToSet: { [`posts.${slug}.likers`]: deviceId },
-          $set: {
-            updatedAt: now,
-            [`posts.${slug}.slug`]: slug,
-            [`posts.${slug}.updatedAt`]: now,
-          },
-          $setOnInsert: {
-            websiteId,
-            createdAt: now,
-          },
-        };
+    const post = await db
+      .prepare('SELECT likes FROM posts WHERE website_id = ? AND slug = ?')
+      .bind(websiteId, slug)
+      .first();
 
-    const result = await col.findOneAndUpdate(
-      { websiteId },
-      updateOp,
-      { upsert: true, returnDocument: 'after' }
-    );
-
-    const doc = result?.value || result;
-    const updatedLikes = Math.max(0, doc?.posts?.[slug]?.likes || 0);
+    const updatedLikes = post ? Math.max(0, Number(post.likes || 0)) : 0;
 
     return jsonResponse(
       {

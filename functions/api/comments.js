@@ -2,12 +2,12 @@
  * Endpoint: /api/comments
  * Methods:
  *   GET    (fetch comments for a post)
- *   POST   (submit a comment — authenticated or guest)
- *   DELETE (remove a comment)
- * Multi-tenant SaaS with verified author support.
+ *   POST   (submit a comment — authenticated or guest with recaptcha)
+ *   DELETE (remove a comment by owner)
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../lib/mongodb.js';
+import { getDb } from '../lib/db.js';
 import { jsonResponse, errorResponse } from '../lib/cors.js';
 import { isValidSlug, validateCommentInput } from '../lib/validation.js';
 import { getAuthenticatedUser } from '../lib/auth.js';
@@ -18,6 +18,26 @@ async function sha256Hex(str) {
   const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function verifyRecaptcha(token, env) {
+  const secretKey = env?.RECAPTCHA_SECRET_KEY;
+  if (!secretKey) return true; // If no captcha key configured, pass
+  if (!token) return false;
+  try {
+    const formData = new URLSearchParams();
+    formData.append('secret', secretKey);
+    formData.append('response', token);
+
+    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+    return data.success === true;
+  } catch {
+    return false;
+  }
 }
 
 export async function onRequestGet(context) {
@@ -35,31 +55,37 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const col = await getCollection('websites', env);
-    const websiteDoc = await col.findOne(
-      { websiteId },
-      { projection: { [`posts.${slug}.comments`]: 1 } }
-    );
+    const db = await getDb(env);
+    const queryResult = await db
+      .prepare(
+        `SELECT id, slug, user_id as userId, author, is_verified as isVerified,
+                email_hash as emailHash, subscribe_updates as subscribeUpdates,
+                text, created_at as date
+         FROM comments
+         WHERE website_id = ? AND slug = ?
+         ORDER BY created_at DESC`
+      )
+      .bind(websiteId, slug)
+      .all();
 
-    const comments = (websiteDoc?.posts?.[slug]?.comments || []).slice().reverse();
-    const formatted = comments.map((c) => ({
+    const comments = (queryResult.results || []).map((c) => ({
       id: c.id,
-      slug,
+      slug: c.slug,
       userId: c.userId || null,
       author: c.author,
       isVerified: Boolean(c.isVerified),
       emailHash: c.emailHash || null,
       subscribeUpdates: Boolean(c.subscribeUpdates),
       text: c.text,
-      date: c.createdAt ? new Date(c.createdAt).toISOString() : new Date().toISOString(),
+      date: c.date,
     }));
 
     return jsonResponse(
       {
         websiteId,
         slug,
-        comments: formatted,
-        count: formatted.length,
+        comments,
+        count: comments.length,
       },
       200,
       request,
@@ -67,26 +93,6 @@ export async function onRequestGet(context) {
     );
   } catch (err) {
     return errorResponse(`Database error: ${err.message}`, 500, request, env);
-  }
-}
-
-async function verifyRecaptcha(token, env) {
-  const secretKey = env?.RECAPTCHA_SECRET_KEY;
-  if (!secretKey) return false;
-  if (!token) return false;
-  try {
-    const formData = new URLSearchParams();
-    formData.append('secret', secretKey);
-    formData.append('response', token);
-
-    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
-      method: 'POST',
-      body: formData,
-    });
-    const data = await res.json();
-    return data.success === true;
-  } catch {
-    return false;
   }
 }
 
@@ -113,8 +119,8 @@ export async function onRequestPost(context) {
     return errorResponse(validation.error, 400, request, env);
   }
 
-  // If not authenticated, require reCAPTCHA verification
-  if (!authUser) {
+  // If not authenticated, verify reCAPTCHA if secret key is configured
+  if (!authUser && env?.RECAPTCHA_SECRET_KEY) {
     const isHuman = await verifyRecaptcha(body.recaptchaToken, env);
     if (!isHuman) {
       return errorResponse('reCAPTCHA verification failed. Please complete the captcha.', 400, request, env);
@@ -123,43 +129,35 @@ export async function onRequestPost(context) {
 
   const { slug, author, text, email, subscribeUpdates } = validation.data;
   const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  const now = new Date();
+  const now = new Date().toISOString();
 
-  // Determine author attributes: authenticated vs guest
   const authorName = authUser ? authUser.name : author;
   const emailToHash = authUser ? authUser.email : email;
   const emailHash = await sha256Hex(emailToHash);
-
-  const commentDoc = {
-    id: commentId,
-    userId: authUser ? authUser.userId : null,
-    author: authorName,
-    isVerified: Boolean(authUser),
-    emailHash,
-    subscribeUpdates: Boolean(subscribeUpdates),
-    text,
-    authorToken: body.authorToken ? String(body.authorToken).slice(0, 100) : null,
-    createdAt: now,
-  };
+  const authorToken = body.authorToken ? String(body.authorToken).slice(0, 100) : null;
 
   try {
-    const col = await getCollection('websites', env);
-    await col.updateOne(
-      { websiteId },
-      {
-        $push: { [`posts.${slug}.comments`]: commentDoc },
-        $set: {
-          updatedAt: now,
-          [`posts.${slug}.slug`]: slug,
-          [`posts.${slug}.updatedAt`]: now,
-        },
-        $setOnInsert: {
-          websiteId,
-          createdAt: now,
-        },
-      },
-      { upsert: true }
-    );
+    const db = await getDb(env);
+
+    await db
+      .prepare(
+        `INSERT INTO comments (id, website_id, slug, user_id, author, is_verified, email_hash, subscribe_updates, text, author_token, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        commentId,
+        websiteId,
+        slug,
+        authUser ? authUser.userId : null,
+        authorName,
+        authUser ? 1 : 0,
+        emailHash,
+        subscribeUpdates ? 1 : 0,
+        text,
+        authorToken,
+        now
+      )
+      .run();
 
     return jsonResponse(
       {
@@ -167,13 +165,13 @@ export async function onRequestPost(context) {
         comment: {
           id: commentId,
           slug,
-          userId: commentDoc.userId,
-          author: commentDoc.author,
-          isVerified: commentDoc.isVerified,
-          emailHash: commentDoc.emailHash,
-          subscribeUpdates: commentDoc.subscribeUpdates,
+          userId: authUser ? authUser.userId : null,
+          author: authorName,
+          isVerified: Boolean(authUser),
+          emailHash,
+          subscribeUpdates: Boolean(subscribeUpdates),
           text,
-          date: now.toISOString(),
+          date: now,
         },
       },
       201,
@@ -207,32 +205,17 @@ export async function onRequestDelete(context) {
   }
 
   try {
-    const col = await getCollection('websites', env);
-    const websiteDoc = await col.findOne({ websiteId });
+    const db = await getDb(env);
 
-    if (!websiteDoc || !websiteDoc.posts) {
-      return errorResponse('Comment not found', 404, request, env);
-    }
-
-    let foundPostSlug = null;
-    let targetComment = null;
-
-    for (const [postSlug, postData] of Object.entries(websiteDoc.posts)) {
-      if (Array.isArray(postData?.comments)) {
-        const c = postData.comments.find((item) => item.id === id);
-        if (c) {
-          foundPostSlug = postSlug;
-          targetComment = c;
-          break;
-        }
-      }
-    }
+    const targetComment = await db
+      .prepare('SELECT user_id as userId, author_token as authorToken FROM comments WHERE id = ? AND website_id = ?')
+      .bind(id, websiteId)
+      .first();
 
     if (!targetComment) {
       return errorResponse('Comment not found', 404, request, env);
     }
 
-    // Ownership check: match authenticated user ID OR matching author token
     const isOwner =
       (authUser && targetComment.userId === authUser.userId) ||
       (token && targetComment.authorToken === token);
@@ -241,13 +224,10 @@ export async function onRequestDelete(context) {
       return errorResponse('Forbidden: You can only delete your own comments', 403, request, env);
     }
 
-    await col.updateOne(
-      { websiteId },
-      {
-        $pull: { [`posts.${foundPostSlug}.comments`]: { id } },
-        $set: { updatedAt: new Date() },
-      }
-    );
+    await db
+      .prepare('DELETE FROM comments WHERE id = ? AND website_id = ?')
+      .bind(id, websiteId)
+      .run();
 
     return jsonResponse({ success: true, message: 'Comment deleted', id }, 200, request, env);
   } catch (err) {

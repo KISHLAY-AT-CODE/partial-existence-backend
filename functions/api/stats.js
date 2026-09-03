@@ -1,9 +1,10 @@
 /**
  * Endpoint: /api/stats
  * Method: GET (Aggregate blog stats for the requested website)
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../lib/mongodb.js';
+import { getDb } from '../lib/db.js';
 import { jsonResponse, errorResponse } from '../lib/cors.js';
 
 export async function onRequestGet(context) {
@@ -16,29 +17,28 @@ export async function onRequestGet(context) {
     'partial-existence';
 
   try {
-    const col = await getCollection('websites', env);
-    const websiteDoc = await col.findOne({ websiteId });
+    const db = await getDb(env);
 
-    let totalViews = 0;
-    let totalLikes = 0;
-    let totalComments = 0;
-
-    if (websiteDoc?.posts) {
-      for (const post of Object.values(websiteDoc.posts)) {
-        totalViews += Number(post.views || 0);
-        totalLikes += Number(post.likes || 0);
-        if (Array.isArray(post.comments)) {
-          totalComments += post.comments.length;
-        }
-      }
-    }
+    const [postStats, commentStats] = await Promise.all([
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(views), 0) as totalViews, COALESCE(SUM(likes), 0) as totalLikes
+           FROM posts WHERE website_id = ?`
+        )
+        .bind(websiteId)
+        .first(),
+      db
+        .prepare(`SELECT COUNT(*) as totalComments FROM comments WHERE website_id = ?`)
+        .bind(websiteId)
+        .first(),
+    ]);
 
     return jsonResponse(
       {
         websiteId,
-        totalViews,
-        totalLikes,
-        totalComments,
+        totalViews: Number(postStats?.totalViews || 0),
+        totalLikes: Number(postStats?.totalLikes || 0),
+        totalComments: Number(commentStats?.totalComments || 0),
         timestamp: new Date().toISOString(),
       },
       200,

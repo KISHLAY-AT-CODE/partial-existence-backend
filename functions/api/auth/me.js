@@ -1,9 +1,10 @@
 /**
  * Endpoint: GET /api/auth/me
  * Retrieves current authenticated user profile
+ * Storage: Cloudflare D1 Database
  */
 
-import { getCollection } from '../../lib/mongodb.js';
+import { getDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { getAuthenticatedUser } from '../../lib/auth.js';
 
@@ -16,8 +17,11 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const usersCol = await getCollection('users', env);
-    const user = await usersCol.findOne({ userId: authUser.userId });
+    const db = await getDb(env);
+    const user = await db
+      .prepare('SELECT user_id as userId, name, email, created_at as createdAt FROM users WHERE user_id = ?')
+      .bind(authUser.userId)
+      .first();
 
     if (!user) {
       return errorResponse('User account not found', 404, request, env);
@@ -30,7 +34,7 @@ export async function onRequestGet(context) {
           id: user.userId,
           name: user.name,
           email: user.email,
-          createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : new Date().toISOString(),
+          createdAt: user.createdAt,
         },
       },
       200,
