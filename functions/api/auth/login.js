@@ -4,7 +4,7 @@
  * Storage: Cloudflare D1 Database
  */
 
-import { getDb } from '../../lib/db.js';
+import { getAuthDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { verifyPassword, createAuthToken } from '../../lib/auth.js';
 
@@ -27,7 +27,7 @@ export async function onRequestPost(context) {
   const cleanEmail = email.trim().toLowerCase();
 
   try {
-    const db = await getDb(env);
+    const db = await getAuthDb(env);
     const user = await db
       .prepare(
         `SELECT user_id as userId, name, email, password_hash as passwordHash, created_at as createdAt

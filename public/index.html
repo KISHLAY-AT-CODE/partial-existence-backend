@@ -3,116 +3,736 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Partial Existence API — Status</title>
+  <title>Partial Existence — Blog Engagement & Auth SaaS Platform</title>
+  <meta name="description" content="Serverless multi-tenant edge SaaS engine providing drop-in user authentication, verified comments, likes, and pageview analytics for any blog or website.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #09090b;
-      --card: #18181b;
-      --border: #27272a;
-      --text: #fafafa;
-      --muted: #a1a1aa;
-      --accent: #22c55e;
-      --accent-glow: rgba(34, 197, 94, 0.2);
+      --bg: #070908;
+      --card-bg: rgba(18, 24, 20, 0.7);
+      --card-border: rgba(120, 168, 140, 0.2);
+      --card-border-glow: rgba(160, 200, 70, 0.35);
+      --accent: #a3c938;
+      --accent-hover: #b8e040;
+      --accent-dim: rgba(163, 201, 56, 0.12);
+      --accent-glow: rgba(163, 201, 56, 0.28);
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-faint: #64748b;
+      --danger: #f87171;
+      --success: #4ade80;
+      --font-heading: 'Space Grotesk', -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
     }
-    body {
+
+    * {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    body {
       background-color: var(--bg);
       color: var(--text);
-      display: flex;
-      justify-content: center;
-      align-items: center;
+      font-family: var(--font-heading);
       min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px 64px 16px;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 15% 10%, rgba(163, 201, 56, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 90%, rgba(60, 140, 100, 0.08) 0%, transparent 40%);
     }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2.5rem;
-      max-width: 520px;
-      width: 90%;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+
+    .container {
+      width: 100%;
+      max-width: 960px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
     }
-    .status-badge {
+
+    /* Header */
+    .header {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.5rem;
-      background: var(--accent-glow);
+      gap: 6px;
+      background: var(--accent-dim);
+      border: 1px solid var(--card-border-glow);
       color: var(--accent);
-      padding: 0.35rem 0.75rem;
+      padding: 4px 14px;
       border-radius: 9999px;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       font-weight: 600;
-      margin-bottom: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
     }
+
     .dot {
       width: 8px;
       height: 8px;
-      background-color: var(--accent);
       border-radius: 50%;
-      box-shadow: 0 0 8px var(--accent);
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+      animation: pulse 2s infinite;
     }
-    h1 {
-      font-size: 1.5rem;
-      margin: 0 0 0.5rem 0;
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
     }
-    p {
-      color: var(--muted);
-      line-height: 1.6;
-      font-size: 0.95rem;
-      margin-bottom: 1.5rem;
+
+    .title {
+      font-size: 2.5rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #ffffff 40%, var(--text-muted) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1.15;
     }
-    .endpoints {
-      background: #121214;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1.05rem;
+      max-width: 640px;
+      line-height: 1.5;
     }
-    .endpoint {
+
+    /* Main Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 840px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Glass Card */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
       display: flex;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 16px;
+      transition: border-color 0.25s ease;
+    }
+
+    .card:hover {
+      border-color: rgba(163, 201, 56, 0.4);
+    }
+
+    .card__header {
+      display: flex;
       align-items: center;
-      font-family: monospace;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 12px;
+    }
+
+    .card__title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card__subtitle {
       font-size: 0.85rem;
-      padding: 0.4rem 0;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      color: var(--text-muted);
     }
-    .endpoint:last-child {
-      border-bottom: none;
+
+    /* Form Styles */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
+
+    .form-label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .form-input {
+      background: rgba(8, 12, 10, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: var(--font-heading);
+      font-size: 0.95rem;
+      color: #ffffff;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    .btn {
+      background: var(--accent);
+      color: #050a06;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-family: var(--font-heading);
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 14px var(--accent-glow);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn--secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      border: 1px solid var(--card-border);
+    }
+
+    .btn--secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.14);
+      color: var(--accent);
+    }
+
+    /* Code Snippet Box */
+    .code-box {
+      background: #040705;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #a7f3d0;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      position: relative;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      border-radius: 4px;
+      padding: 4px 8px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      cursor: pointer;
+      font-family: var(--font-heading);
+    }
+
+    .copy-btn:hover {
+      background: var(--accent);
+      color: #000;
+    }
+
+    /* Live Sandbox Component */
+    .sandbox-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .sandbox-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .interactive-counter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+
+    .counter-badge {
+      font-family: var(--font-mono);
+      background: rgba(163, 201, 56, 0.15);
+      color: var(--accent);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    .alert {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+
+    .alert--success {
+      background: rgba(74, 222, 128, 0.12);
+      border: 1px solid rgba(74, 222, 128, 0.25);
+      color: var(--success);
+    }
+
+    .alert--error {
+      background: rgba(248, 113, 113, 0.12);
+      border: 1px solid rgba(248, 113, 113, 0.25);
+      color: var(--danger);
+    }
+
+    /* API Endpoint List */
+    .endpoint-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .endpoint-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+
     .method {
-      color: #38bdf8;
-      font-weight: bold;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.7rem;
+    }
+
+    .method--get { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
+    .method--post { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+    .method--delete { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+
+    .footer {
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--text-faint);
+      margin-top: 24px;
+    }
+
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="status-badge">
-      <span class="dot"></span> Edge Functions Active
-    </div>
-    <h1>Partial Existence Backend</h1>
-    <p>Cloudflare Pages serverless backend for comments, likes, and pageviews powered by Cloudflare D1 Edge SQL.</p>
+  <div class="container">
+    
+    <!-- Top Header -->
+    <header class="header">
+      <div class="badge">
+        <span class="dot"></span> Edge SaaS Active &bull; Cloudflare D1
+      </div>
+      <h1 class="title">Partial Existence Engine</h1>
+      <p class="subtitle">
+        Drop-in serverless SaaS platform providing user authentication, verified comments, like counters, and pageview analytics for any blog or website.
+      </p>
+    </header>
 
-    <div class="endpoints">
-      <div class="endpoint">
-        <span class="method">GET/POST</span>
-        <span>/api/pageviews?slug={id}</span>
-      </div>
-      <div class="endpoint">
-        <span class="method">GET/POST</span>
-        <span>/api/likes?slug={id}</span>
-      </div>
-      <div class="endpoint">
-        <span class="method">GET/POST</span>
-        <span>/api/comments?slug={id}</span>
-      </div>
-      <div class="endpoint">
-        <span class="method">GET</span>
-        <span>/api/stats</span>
-      </div>
-    </div>
+    <!-- Main Grid -->
+    <main class="grid">
+      
+      <!-- Card 1: Connect Your Blog -->
+      <section class="card" id="connect-section">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">🔌 Connect Your Website</h2>
+            <p class="card__subtitle">Register your blog to generate your instant API snippet</p>
+          </div>
+        </div>
+
+        <form id="connect-form" onsubmit="handleConnectWebsite(event)" style="display: flex; flex-direction: column; gap: 14px;">
+          <div class="form-group">
+            <label class="form-label" for="site-name">Website / Blog Name</label>
+            <input class="form-input" id="site-name" type="text" placeholder="e.g. My Personal Journal" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="site-url">Website URL (Domain)</label>
+            <input class="form-input" id="site-url" type="url" placeholder="e.g. https://my-awesome-blog.com" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="site-id">Custom Website ID (Optional Slug)</label>
+            <input class="form-input" id="site-id" type="text" placeholder="e.g. my-awesome-blog" />
+          </div>
+
+          <button class="btn" id="connect-btn" type="submit">
+            Connect & Generate Snippet &rarr;
+          </button>
+        </form>
+
+        <div id="connect-result" style="display: none; flex-direction: column; gap: 12px;">
+          <div class="alert alert--success" id="connect-alert">
+            Website registered successfully!
+          </div>
+
+          <label class="form-label">1. Add to your <code>site.config.js</code>:</label>
+          <div class="code-box">
+            <button class="copy-btn" onclick="copySnippet('config-snippet')">Copy</button>
+            <code id="config-snippet"></code>
+          </div>
+
+          <label class="form-label">2. Or embed via HTML Script:</label>
+          <div class="code-box">
+            <button class="copy-btn" onclick="copySnippet('script-snippet')">Copy</button>
+            <code id="script-snippet"></code>
+          </div>
+        </div>
+      </section>
+
+      <!-- Card 2: Interactive Sandbox & Live Tester -->
+      <section class="card">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">⚡ Live Widget Playground</h2>
+            <p class="card__subtitle">Test the SaaS functions live on Cloudflare Edge</p>
+          </div>
+        </div>
+
+        <div class="sandbox-preview">
+          <!-- Pageviews & Likes -->
+          <div class="sandbox-row">
+            <div class="interactive-counter">
+              <span>👁️ Live Views:</span>
+              <span class="counter-badge" id="preview-views">Loading...</span>
+            </div>
+            <button class="btn btn--secondary" style="padding: 6px 12px; font-size: 0.85rem;" onclick="testRecordView()">
+              + Record View
+            </button>
+          </div>
+
+          <div class="sandbox-row">
+            <div class="interactive-counter">
+              <span>❤️ Post Likes:</span>
+              <span class="counter-badge" id="preview-likes">Loading...</span>
+            </div>
+            <button class="btn" style="padding: 6px 12px; font-size: 0.85rem;" id="preview-like-btn" onclick="testToggleLike()">
+              ❤️ Like Post
+            </button>
+          </div>
+
+          <!-- Auth Status -->
+          <div class="sandbox-row" style="border-top: 1px solid var(--card-border); padding-top: 12px;">
+            <div class="interactive-counter">
+              <span>👤 User Status:</span>
+              <span id="preview-user-status" style="font-size: 0.82rem; color: var(--accent);">Guest (Not Logged In)</span>
+            </div>
+            <button class="btn btn--secondary" id="preview-auth-btn" style="padding: 6px 12px; font-size: 0.85rem;" onclick="toggleTestAuthModal()">
+              Sign In / Register
+            </button>
+          </div>
+
+          <!-- Comments Notice -->
+          <div style="font-size: 0.8rem; color: var(--text-muted); background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 6px;">
+            💬 <strong>Mandatory Auth Rule:</strong> Only authenticated users can submit comments. Guest comments are automatically rejected with <code>401 Unauthorized</code>.
+          </div>
+        </div>
+
+        <!-- Quick Test Comment -->
+        <div class="form-group">
+          <label class="form-label" for="test-comment-input">Test Comment Submission</label>
+          <div style="display: flex; gap: 8px;">
+            <input class="form-input" id="test-comment-input" type="text" placeholder="Write a test comment..." style="flex: 1;" />
+            <button class="btn" style="padding: 0 16px;" onclick="testPostComment()">Post</button>
+          </div>
+          <span id="comment-feedback" style="font-size: 0.78rem; margin-top: 4px;"></span>
+        </div>
+      </section>
+
+      <!-- Card 3: Live Endpoints & API Reference -->
+      <section class="card" style="grid-column: 1 / -1;">
+        <div class="card__header">
+          <div>
+            <h2 class="card__title">📡 Serverless REST API Reference</h2>
+            <p class="card__subtitle">All endpoints accept <code>X-Website-Id</code> and <code>Authorization: Bearer &lt;token&gt;</code></p>
+          </div>
+        </div>
+
+        <div class="endpoint-list">
+          <div class="endpoint-item">
+            <span><span class="method method--post">POST</span> /api/websites</span>
+            <span style="color: var(--text-muted);">Register / Connect a new website</span>
+          </div>
+          <div class="endpoint-item">
+            <span><span class="method method--get">GET</span> /api/websites?websiteId={id}</span>
+            <span style="color: var(--text-muted);">Get registered website details & config</span>
+          </div>
+          <div class="endpoint-item">
+            <span><span class="method method--post">POST</span> /api/auth/register &bull; /api/auth/login</span>
+            <span style="color: var(--text-muted);">User Authentication & JWT Issuance</span>
+          </div>
+          <div class="endpoint-item">
+            <span><span class="method method--get">GET</span> /api/auth/me</span>
+            <span style="color: var(--text-muted);">Verify session token and retrieve user profile</span>
+          </div>
+          <div class="endpoint-item">
+            <span><span class="method method--get">GET</span> /api/comments?slug={slug}</span>
+            <span style="color: var(--text-muted);">Fetch verified comments for a post</span>
+          </div>
+          <div class="endpoint-item">
+            <span><span class="method method--post">POST</span> /api/comments</span>
+            <span style="color: var(--text-muted);">Submit verified comment (Requires Bearer token)</span>
+          </div>
+          <div class="endpoint-item">
+            <span><span class="method method--get">GET</span> /api/pageviews &bull; /api/likes &bull; /api/stats</span>
+            <span style="color: var(--text-muted);">Real-time deduplicated counters & aggregate metrics</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="footer">
+      Powered by <a href="https://kishlay-at-code.github.io/partial-existence/" target="_blank">Partial Existence</a> &bull; Cloudflare Pages Functions & D1 Edge SQLite.
+    </footer>
+
   </div>
+
+  <!-- Interactive Sandbox Logic -->
+  <script>
+    const API_BASE = window.location.origin;
+    const SAMPLE_SLUG = 'mushishi-review';
+    let currentAuthToken = localStorage.getItem('pe_saas_token') || null;
+    let currentUser = null;
+
+    // Load initial counts
+    async function loadInitialStats() {
+      try {
+        const [viewRes, likeRes] = await Promise.all([
+          fetch(`${API_BASE}/api/pageviews?slug=${SAMPLE_SLUG}&websiteId=partial-existence`).then(r => r.json()),
+          fetch(`${API_BASE}/api/likes?slug=${SAMPLE_SLUG}&websiteId=partial-existence`).then(r => r.json())
+        ]);
+        document.getElementById('preview-views').innerText = `${viewRes.views || 0} views`;
+        document.getElementById('preview-likes').innerText = `${likeRes.likes || 0} likes`;
+      } catch (err) {
+        document.getElementById('preview-views').innerText = '0 views';
+        document.getElementById('preview-likes').innerText = '0 likes';
+      }
+
+      // Check auth token
+      if (currentAuthToken) {
+        try {
+          const meRes = await fetch(`${API_BASE}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${currentAuthToken}`, 'X-Website-Id': 'partial-existence' }
+          });
+          if (meRes.ok) {
+            const data = await meRes.json();
+            currentUser = data.user;
+            document.getElementById('preview-user-status').innerText = `Logged in as ${currentUser.name} (${currentUser.email})`;
+            document.getElementById('preview-auth-btn').innerText = 'Sign Out';
+          }
+        } catch {}
+      }
+    }
+
+    async function handleConnectWebsite(e) {
+      e.preventDefault();
+      const btn = document.getElementById('connect-btn');
+      btn.disabled = true;
+      btn.innerText = 'Connecting...';
+
+      const name = document.getElementById('site-name').value;
+      const url = document.getElementById('site-url').value;
+      const customId = document.getElementById('site-id').value;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/websites`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, url, websiteId: customId })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          document.getElementById('connect-result').style.display = 'flex';
+          document.getElementById('config-snippet').innerText = data.snippets.siteConfig;
+          document.getElementById('script-snippet').innerText = data.snippets.scriptTag;
+          document.getElementById('connect-alert').innerText = `✅ Connected "${data.website.name}"! Website ID: ${data.website.websiteId}`;
+        } else {
+          alert(`Error: ${data.error || 'Failed to connect website'}`);
+        }
+      } catch (err) {
+        alert(`Network Error: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Connect & Generate Snippet →';
+      }
+    }
+
+    async function testRecordView() {
+      const deviceId = 'demo_device_' + Math.random().toString(36).substring(2, 8);
+      const res = await fetch(`${API_BASE}/api/pageviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Website-Id': 'partial-existence' },
+        body: JSON.stringify({ slug: SAMPLE_SLUG, deviceId })
+      });
+      const data = await res.json();
+      if (data.views !== undefined) {
+        document.getElementById('preview-views').innerText = `${data.views} views`;
+      }
+    }
+
+    async function testToggleLike() {
+      const res = await fetch(`${API_BASE}/api/likes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Website-Id': 'partial-existence' },
+        body: JSON.stringify({ slug: SAMPLE_SLUG, action: 'like' })
+      });
+      const data = await res.json();
+      if (data.likes !== undefined) {
+        document.getElementById('preview-likes').innerText = `${data.likes} likes`;
+      }
+    }
+
+    async function testPostComment() {
+      const input = document.getElementById('test-comment-input');
+      const text = input.value.trim();
+      const feedback = document.getElementById('comment-feedback');
+
+      if (!text) {
+        feedback.innerText = 'Please enter comment text.';
+        feedback.style.color = 'var(--danger)';
+        return;
+      }
+
+      feedback.innerText = 'Submitting comment...';
+      feedback.style.color = 'var(--text-muted)';
+
+      const headers = { 'Content-Type': 'application/json', 'X-Website-Id': 'partial-existence' };
+      if (currentAuthToken) {
+        headers['Authorization'] = `Bearer ${currentAuthToken}`;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/comments`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ slug: SAMPLE_SLUG, text })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          feedback.innerText = `✅ Comment posted as verified user "${data.comment.author}"!`;
+          feedback.style.color = 'var(--success)';
+          input.value = '';
+        } else {
+          feedback.innerText = `❌ ${data.error || 'Authentication required to post comments.'}`;
+          feedback.style.color = 'var(--danger)';
+        }
+      } catch (err) {
+        feedback.innerText = `❌ Network Error: ${err.message}`;
+        feedback.style.color = 'var(--danger)';
+      }
+    }
+
+    function toggleTestAuthModal() {
+      if (currentAuthToken) {
+        // Sign out
+        localStorage.removeItem('pe_saas_token');
+        currentAuthToken = null;
+        currentUser = null;
+        document.getElementById('preview-user-status').innerText = 'Guest (Not Logged In)';
+        document.getElementById('preview-auth-btn').innerText = 'Sign In / Register';
+        return;
+      }
+
+      const email = prompt('Enter your email to test Register/Sign In:');
+      if (!email) return;
+      const name = prompt('Enter your display name:') || 'Demo User';
+      const password = prompt('Enter password (min 6 chars):') || 'Password123!';
+
+      fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Website-Id': 'partial-existence' },
+        body: JSON.stringify({ name, email, password })
+      })
+      .then(async r => {
+        if (!r.ok) {
+          // If already exists, login
+          return fetch(`${API_BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Website-Id': 'partial-existence' },
+            body: JSON.stringify({ email, password })
+          });
+        }
+        return r;
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.token) {
+          currentAuthToken = data.token;
+          currentUser = data.user;
+          localStorage.setItem('pe_saas_token', data.token);
+          document.getElementById('preview-user-status').innerText = `Logged in as ${currentUser.name} (${currentUser.email})`;
+          document.getElementById('preview-auth-btn').innerText = 'Sign Out';
+          alert(`Logged in successfully as ${currentUser.name}! You can now submit verified comments.`);
+        } else {
+          alert(`Auth failed: ${data.error || 'Check credentials'}`);
+        }
+      });
+    }
+
+    function copySnippet(id) {
+      const text = document.getElementById(id).innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard!');
+      });
+    }
+
+    loadInitialStats();
+  </script>
 </body>
 </html>

@@ -1,10 +1,24 @@
 /**
- * functions/lib/db.js — Cloudflare D1 Database Helper & Auto-Migration
+ * functions/lib/db.js — Cloudflare D1 Dual-Database Helper & Schema Manager
+ *
+ * Supports:
+ * 1. Content & Metrics Store (env.CONTENT_DB || env.DB) -> websites, posts, comments, viewers, likers
+ * 2. Dedicated User Identity Store (env.AUTH_DB || env.DB) -> users
  */
 
-let isSchemaInitialized = false;
+let isContentSchemaInitialized = false;
+let isAuthSchemaInitialized = false;
 
-const STATEMENTS = [
+const CONTENT_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS websites (
+    website_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    allowed_origins TEXT,
+    admin_email TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );`,
   `CREATE TABLE IF NOT EXISTS posts (
     website_id TEXT NOT NULL,
     slug TEXT NOT NULL,
@@ -32,15 +46,19 @@ const STATEMENTS = [
     id TEXT PRIMARY KEY,
     website_id TEXT NOT NULL,
     slug TEXT NOT NULL,
-    user_id TEXT,
+    user_id TEXT NOT NULL,
     author TEXT NOT NULL,
-    is_verified INTEGER DEFAULT 0,
+    is_verified INTEGER DEFAULT 1,
     email_hash TEXT,
     subscribe_updates INTEGER DEFAULT 0,
     text TEXT NOT NULL,
     author_token TEXT,
     created_at TEXT NOT NULL
   );`,
+  `CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(website_id, slug, created_at DESC);`
+];
+
+const AUTH_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -50,39 +68,66 @@ const STATEMENTS = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );`,
-  `CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(website_id, slug, created_at DESC);`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`
 ];
 
 /**
- * Get D1 Database instance and auto-initialize tables if needed
+ * Get Content & Metrics D1 Database (env.CONTENT_DB or env.DB)
  * @param {object} env - Cloudflare Pages environment
  * @returns {Promise<D1Database>}
  */
-export async function getDb(env) {
-  const db = env?.DB;
+export async function getContentDb(env) {
+  const db = env?.CONTENT_DB || env?.DB;
   if (!db) {
     throw new Error(
-      'Cloudflare D1 binding "DB" is missing. Please add a D1 database binding named "DB" in Cloudflare Pages Settings > Functions > D1 Database Bindings.'
+      'Cloudflare D1 binding "DB" (or "CONTENT_DB") is missing. Please add a D1 database binding named "DB" in Cloudflare Pages Settings > Functions > D1 Database Bindings.'
     );
   }
 
-  if (!isSchemaInitialized) {
-    try {
-      await db.batch(STATEMENTS.map((sql) => db.prepare(sql)));
-      isSchemaInitialized = true;
-    } catch (err) {
-      console.warn('[D1] Batch schema init error, trying individual statements:', err.message);
-      for (const stmt of STATEMENTS) {
-        try {
-          await db.prepare(stmt).run();
-        } catch (subErr) {
-          console.error('[D1] Table statement error:', subErr.message);
-        }
+  if (!isContentSchemaInitialized) {
+    for (const stmt of CONTENT_STATEMENTS) {
+      try {
+        await db.prepare(stmt).run();
+      } catch (err) {
+        // Table or index may already exist
       }
-      isSchemaInitialized = true;
     }
+    isContentSchemaInitialized = true;
   }
 
   return db;
+}
+
+/**
+ * Get Dedicated Auth/User D1 Database (env.AUTH_DB or env.DB)
+ * @param {object} env - Cloudflare Pages environment
+ * @returns {Promise<D1Database>}
+ */
+export async function getAuthDb(env) {
+  const db = env?.AUTH_DB || env?.DB;
+  if (!db) {
+    throw new Error(
+      'Cloudflare D1 binding "AUTH_DB" (or "DB") is missing. Please add a D1 database binding named "DB" in Cloudflare Pages Settings > Functions > D1 Database Bindings.'
+    );
+  }
+
+  if (!isAuthSchemaInitialized) {
+    for (const stmt of AUTH_STATEMENTS) {
+      try {
+        await db.prepare(stmt).run();
+      } catch (err) {
+        // Table or index may already exist
+      }
+    }
+    isAuthSchemaInitialized = true;
+  }
+
+  return db;
+}
+
+/**
+ * Unified alias for content/metrics operations
+ */
+export async function getDb(env) {
+  return getContentDb(env);
 }

@@ -4,7 +4,7 @@
  * Storage: Cloudflare D1 Database
  */
 
-import { getDb } from '../../lib/db.js';
+import { getAuthDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { hashPassword, createAuthToken } from '../../lib/auth.js';
 
@@ -38,7 +38,7 @@ export async function onRequestPost(context) {
   const cleanEmail = email.trim().toLowerCase();
 
   try {
-    const db = await getDb(env);
+    const db = await getAuthDb(env);
 
     const existingUser = await db
       .prepare('SELECT user_id FROM users WHERE email = ?')

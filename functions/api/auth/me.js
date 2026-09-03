@@ -4,7 +4,7 @@
  * Storage: Cloudflare D1 Database
  */
 
-import { getDb } from '../../lib/db.js';
+import { getAuthDb } from '../../lib/db.js';
 import { jsonResponse, errorResponse } from '../../lib/cors.js';
 import { getAuthenticatedUser } from '../../lib/auth.js';
 
@@ -17,7 +17,7 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const db = await getDb(env);
+    const db = await getAuthDb(env);
     const user = await db
       .prepare('SELECT user_id as userId, name, email, created_at as createdAt FROM users WHERE user_id = ?')
       .bind(authUser.userId)
