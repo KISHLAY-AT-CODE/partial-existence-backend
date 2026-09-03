@@ -37,6 +37,20 @@ export async function onRequestPost(context) {
   const cleanName = name.trim().slice(0, 50);
   const cleanEmail = email.trim().toLowerCase();
 
+  // Strict Developer Account Blockade: Developer root identity is permanently reserved and locked
+  const normalizedDevEmail = 'dev.vinyas.one@gmail.com';
+  const strippedEmail = cleanEmail.replace(/\+.*@/, '@').replace(/\./g, '');
+  const strippedDev = normalizedDevEmail.replace(/\./g, '');
+
+  if (
+    cleanEmail === normalizedDevEmail ||
+    cleanEmail.includes('dev.vinyas.one') ||
+    strippedEmail.startsWith('devvinyasone') ||
+    cleanEmail.endsWith('@vinyas.one')
+  ) {
+    return errorResponse('Registration forbidden: Developer root identity is permanently reserved and locked.', 403, request, env);
+  }
+
   try {
     const db = await getAuthDb(env);
 
