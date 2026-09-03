@@ -1,9 +1,10 @@
 /**
  * Endpoint: /api/comments
  * Methods:
- *   GET    (fetch comments for a post OR fetch all comments for blog owner moderation)
- *   POST   (submit a comment — MANDATORY sign-in & English/Hindi/Hinglish/Tamil profanity filter)
- *   DELETE (remove a comment by author OR by verified blog owner/developer)
+ *   GET    (fetch approved comments for blog post OR all comments for blog owner moderation)
+ *   POST   (submit a comment — holds flagged comments for blog owner review)
+ *   PUT    (approve a held comment by blog owner)
+ *   DELETE (delete a comment by author OR blog owner)
  * Storage: Cloudflare D1 Database
  */
 
@@ -36,7 +37,7 @@ export async function onRequestGet(context) {
   try {
     const db = await getContentDb(env);
 
-    // 1. Blog Owner Moderation View: List all comments on owner's blogs
+    // 1. Blog Owner Moderation View: List all comments (approved and held) on owner's blogs
     if (isOwnerView) {
       const authUser = await getAuthenticatedUser(request, env);
       if (!authUser) {
@@ -47,26 +48,26 @@ export async function onRequestGet(context) {
       let params;
 
       if (authUser.email === DEVELOPER_EMAIL) {
-        // Developer sees comments across all blogs
         commentsQuery = `
           SELECT c.id, c.website_id as websiteId, c.slug, c.user_id as userId,
-                 c.author, c.text, c.created_at as date, w.name as websiteName
+                 c.author, c.text, c.status, c.flagged_reason as flaggedReason,
+                 c.created_at as date, w.name as websiteName
           FROM comments c
           LEFT JOIN websites w ON c.website_id = w.website_id
-          ORDER BY c.created_at DESC
-          LIMIT 100
+          ORDER BY (CASE WHEN c.status = 'held_for_review' THEN 0 ELSE 1 END), c.created_at DESC
+          LIMIT 150
         `;
         params = [];
       } else {
-        // Blog owner sees comments on their own blogs
         commentsQuery = `
           SELECT c.id, c.website_id as websiteId, c.slug, c.user_id as userId,
-                 c.author, c.text, c.created_at as date, w.name as websiteName
+                 c.author, c.text, c.status, c.flagged_reason as flaggedReason,
+                 c.created_at as date, w.name as websiteName
           FROM comments c
           INNER JOIN websites w ON c.website_id = w.website_id
           WHERE w.owner_user_id = ? OR w.admin_email = ? OR (c.website_id = 'partial-existence' AND ? = 'partial-existence')
-          ORDER BY c.created_at DESC
-          LIMIT 100
+          ORDER BY (CASE WHEN c.status = 'held_for_review' THEN 0 ELSE 1 END), c.created_at DESC
+          LIMIT 150
         `;
         params = [authUser.userId, authUser.email, websiteId];
       }
@@ -75,7 +76,7 @@ export async function onRequestGet(context) {
       return jsonResponse({ comments: results.results || [] }, 200, request, env);
     }
 
-    // 2. Post Discussion Thread View
+    // 2. Public Blog Readers: Only return 'approved' comments
     if (!slug || !isValidSlug(slug)) {
       return errorResponse('Valid "slug" query parameter is required', 400, request, env);
     }
@@ -86,7 +87,7 @@ export async function onRequestGet(context) {
                 email_hash as emailHash, subscribe_updates as subscribeUpdates,
                 text, created_at as date
          FROM comments
-         WHERE website_id = ? AND slug = ?
+         WHERE website_id = ? AND slug = ? AND (status = 'approved' OR status IS NULL)
          ORDER BY created_at DESC`
       )
       .bind(websiteId, slug)
@@ -123,7 +124,7 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // 1. Enforce Mandatory Authentication
+  // 1. Enforce Authentication
   const authUser = await getAuthenticatedUser(request, env);
   if (!authUser) {
     return errorResponse(
@@ -159,23 +160,33 @@ export async function onRequestPost(context) {
 
   const { slug, text, subscribeUpdates } = validation.data;
 
-  // 2. Multi-Language Profanity Filter (English, Hindi, Hinglish, Tamil)
-  const profanityCheck = checkProfanity(text);
-  if (profanityCheck.hasProfanity) {
-    return errorResponse(profanityCheck.message, 400, request, env);
-  }
-
-  const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  const now = new Date().toISOString();
-  const emailHash = await sha256Hex(authUser.email);
-
   try {
     const db = await getContentDb(env);
 
+    // 2. Check if user is blocked by blog owner
+    const isBlocked = await db
+      .prepare('SELECT 1 FROM blocked_users WHERE website_id = ? AND user_id = ?')
+      .bind(websiteId, authUser.userId)
+      .first();
+
+    if (isBlocked) {
+      return errorResponse('You have been blocked from commenting on this blog by the blog owner.', 403, request, env);
+    }
+
+    // 3. Multi-Language Profanity Filter (English, Hindi, Hinglish, Tamil)
+    const profanityResult = checkProfanity(text);
+    const isFlagged = profanityResult.hasProfanity;
+    const commentStatus = isFlagged ? 'held_for_review' : 'approved';
+    const flaggedReason = isFlagged ? `Profanity detected: ${profanityResult.detectedWords.join(', ')}` : null;
+
+    const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const now = new Date().toISOString();
+    const emailHash = await sha256Hex(authUser.email);
+
     await db
       .prepare(
-        `INSERT INTO comments (id, website_id, slug, user_id, author, is_verified, email_hash, subscribe_updates, text, author_token, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO comments (id, website_id, slug, user_id, author, is_verified, email_hash, subscribe_updates, text, author_token, status, flagged_reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         commentId,
@@ -183,11 +194,13 @@ export async function onRequestPost(context) {
         slug,
         authUser.userId,
         authUser.name,
-        1, // Verified user account
+        1,
         emailHash,
         subscribeUpdates ? 1 : 0,
         text,
         authUser.userId,
+        commentStatus,
+        flaggedReason,
         now
       )
       .run();
@@ -195,7 +208,11 @@ export async function onRequestPost(context) {
     return jsonResponse(
       {
         success: true,
-        comment: {
+        heldForReview: isFlagged,
+        message: isFlagged
+          ? 'Your reflection was flagged for potential profanity and is held for review by the blog author before appearing publicly.'
+          : 'Reflection posted successfully.',
+        comment: isFlagged ? null : {
           id: commentId,
           slug,
           userId: authUser.userId,
@@ -216,15 +233,65 @@ export async function onRequestPost(context) {
   }
 }
 
+export async function onRequestPut(context) {
+  const { request, env } = context;
+  const authUser = await getAuthenticatedUser(request, env);
+
+  if (!authUser) {
+    return errorResponse('Unauthorized: Blog owner login required', 401, request, env);
+  }
+
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Valid JSON body required', 400, request, env);
+  }
+
+  const { commentId, action = 'approve' } = body;
+  if (!commentId) {
+    return errorResponse('commentId is required', 400, request, env);
+  }
+
+  try {
+    const db = await getContentDb(env);
+    const target = await db
+      .prepare('SELECT id, website_id as websiteId FROM comments WHERE id = ?')
+      .bind(commentId)
+      .first();
+
+    if (!target) {
+      return errorResponse('Comment not found', 404, request, env);
+    }
+
+    // Verify blog owner permission
+    if (authUser.email !== DEVELOPER_EMAIL) {
+      const isOwner = await db
+        .prepare('SELECT 1 FROM websites WHERE website_id = ? AND (owner_user_id = ? OR admin_email = ?)')
+        .bind(target.websiteId, authUser.userId, authUser.email)
+        .first();
+
+      if (!isOwner) {
+        return errorResponse('Forbidden: You can only approve comments on your own blogs', 403, request, env);
+      }
+    }
+
+    const newStatus = action === 'approve' ? 'approved' : 'held_for_review';
+    await db
+      .prepare('UPDATE comments SET status = ? WHERE id = ?')
+      .bind(newStatus, commentId)
+      .run();
+
+    return jsonResponse({ success: true, message: `Comment ${commentId} is now ${newStatus}` }, 200, request, env);
+  } catch (err) {
+    return errorResponse(`Database error: ${err.message}`, 500, request, env);
+  }
+}
+
 export async function onRequestDelete(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const id = url.searchParams.get('id');
-  const websiteId =
-    request.headers.get('x-website-id') ||
-    url.searchParams.get('websiteId') ||
-    env?.WEBSITE_ID ||
-    'partial-existence';
 
   if (!id || typeof id !== 'string') {
     return errorResponse('Valid "id" parameter is required', 400, request, env);
@@ -247,11 +314,6 @@ export async function onRequestDelete(context) {
       return errorResponse('Comment not found', 404, request, env);
     }
 
-    // Check Authorization:
-    // Allowed if:
-    // 1. Author of the comment
-    // 2. Developer (dev.vinyas.one@gmail.com)
-    // 3. Blog Owner of the website where comment is posted
     const isAuthor = targetComment.userId === authUser.userId;
     const isDeveloper = authUser.email === DEVELOPER_EMAIL;
 

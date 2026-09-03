@@ -58,7 +58,18 @@ const CONTENT_STATEMENTS = [
     subscribe_updates INTEGER DEFAULT 0,
     text TEXT NOT NULL,
     author_token TEXT,
+    status TEXT DEFAULT 'approved',
+    flagged_reason TEXT,
     created_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS blocked_users (
+    website_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    email TEXT,
+    blocked_by TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (website_id, user_id)
   );`,
   `CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(website_id, slug, created_at DESC);`
 ];
@@ -81,7 +92,9 @@ const MIGRATIONS = [
   `ALTER TABLE websites ADD COLUMN sample_post_url TEXT;`,
   `ALTER TABLE websites ADD COLUMN post_path_pattern TEXT;`,
   `ALTER TABLE websites ADD COLUMN status TEXT DEFAULT 'pending';`,
-  `ALTER TABLE websites ADD COLUMN verification_token TEXT;`
+  `ALTER TABLE websites ADD COLUMN verification_token TEXT;`,
+  `ALTER TABLE comments ADD COLUMN status TEXT DEFAULT 'approved';`,
+  `ALTER TABLE comments ADD COLUMN flagged_reason TEXT;`
 ];
 
 /**
