@@ -11,9 +11,9 @@
   <style>
     :root {
       --bg: #070908;
-      --card-bg: rgba(18, 24, 20, 0.75);
+      --card-bg: rgba(18, 24, 20, 0.78);
       --card-border: rgba(120, 168, 140, 0.22);
-      --card-border-glow: rgba(160, 200, 70, 0.35);
+      --card-border-glow: rgba(160, 200, 70, 0.4);
       --accent: #a0c040;
       --accent-hover: #b8e040;
       --accent-dim: rgba(160, 192, 64, 0.12);
@@ -93,6 +93,18 @@
       display: flex;
       flex-direction: column;
       gap: 16px;
+      transition: all 0.25s ease;
+    }
+
+    .card--highlight {
+      border-color: var(--accent) !important;
+      box-shadow: 0 0 24px rgba(160, 192, 64, 0.35) !important;
+      animation: pulseGlow 1.2s ease-in-out;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.015); }
     }
 
     .card__header {
@@ -103,6 +115,21 @@
       padding-bottom: 12px;
     }
     .card__title { font-size: 1.2rem; font-weight: 600; color: #ffffff; }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 4px;
+    }
+    .tab {
+      flex: 1; padding: 8px; border: none; background: none; color: var(--text-muted);
+      font-family: var(--font-heading); font-size: 0.85rem; font-weight: 600; cursor: pointer;
+      border-radius: 6px; transition: all 0.2s;
+    }
+    .tab.active { background: var(--accent); color: #050a06; }
 
     /* Forms */
     .form-group { display: flex; flex-direction: column; gap: 6px; }
@@ -180,6 +207,12 @@
       gap: 8px;
     }
 
+    .alert { padding: 12px 14px; border-radius: 8px; font-size: 0.85rem; line-height: 1.45; }
+    .alert--info { background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #7dd3fc; }
+    .alert--success { background: rgba(74, 222, 128, 0.12); border: 1px solid rgba(74, 222, 128, 0.3); color: var(--success); }
+    .alert--warning { background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.3); color: var(--warning); }
+    .alert--danger { background: rgba(248, 113, 113, 0.12); border: 1px solid rgba(248, 113, 113, 0.3); color: var(--danger); }
+
     .footer { text-align: center; font-size: 0.8rem; color: #64748b; margin-top: 20px; }
     .footer a { color: var(--accent); text-decoration: none; }
   </style>
@@ -190,10 +223,10 @@
     <!-- Top Navigation Bar -->
     <div class="top-bar">
       <div class="badge"><span class="dot"></span> SaaS Engine &bull; Bot Protection Active</div>
-      <div id="auth-controls" style="display: flex; align-items: center; gap: 10px;">
-        <span id="user-display" style="font-size: 0.84rem; color: var(--text-muted);">Guest</span>
-        <button class="btn btn--secondary" id="auth-btn" style="padding: 6px 14px; font-size: 0.82rem;" onclick="handleAuthAction()">
-          Blog Owner Login
+      <div id="auth-header-bar" style="display: flex; align-items: center; gap: 10px;">
+        <span id="user-display" style="font-size: 0.84rem; color: var(--text-muted);">Guest (Not Signed In)</span>
+        <button class="btn btn--secondary" id="header-auth-btn" style="padding: 6px 14px; font-size: 0.82rem;" onclick="focusAuthCard()">
+          Sign In / Register
         </button>
       </div>
     </div>
@@ -209,60 +242,128 @@
     <!-- Main Grid -->
     <main class="grid">
       
-      <!-- Card 1: Connect Your Blog -->
-      <section class="card">
-        <div class="card__header">
-          <h2 class="card__title">🔌 Connect New Blog Website</h2>
-        </div>
-
-        <div id="login-gate" style="display: none; background: rgba(250, 204, 21, 0.1); border: 1px solid rgba(250, 204, 21, 0.3); padding: 14px; border-radius: 8px; font-size: 0.85rem; color: var(--warning);">
-          🔒 <strong>Login Required:</strong> Please sign in with your blog owner account below to register a website and prevent automated bot abuse.
-        </div>
-
-        <form id="connect-form" onsubmit="handleRegisterWebsite(event)" style="display: flex; flex-direction: column; gap: 14px;">
-          <div class="form-group">
-            <label class="form-label" for="site-name">Blog / Website Name (Optional)</label>
-            <input class="form-input" id="site-name" type="text" placeholder="e.g. My Personal Reflections" />
+      <!-- Left Column: Blog Connection -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        
+        <!-- Connect Card -->
+        <section class="card" id="connect-card">
+          <div class="card__header">
+            <h2 class="card__title">🔌 Connect Blog Website</h2>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="site-url">1. Blog Website URL (Home / Root)</label>
-            <input class="form-input" id="site-url" type="url" placeholder="e.g. https://kishlay-at-code.github.io/partial-existence/" required />
-            <span style="font-size: 0.72rem; color: var(--text-muted);">Maps the top-right Sign In & User Account bar</span>
+          <!-- Logged In Status Banner -->
+          <div id="connected-user-banner" style="display: none; background: rgba(160, 192, 64, 0.1); border: 1px solid rgba(160, 192, 64, 0.3); padding: 10px 14px; border-radius: 8px; font-size: 0.84rem; color: var(--accent);">
+            ✓ Authenticated as <strong id="banner-user-name">User</strong> (<span id="banner-user-email">email</span>)
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="sample-post-url">2. Sample Blog Page URL (Single Post)</label>
-            <input class="form-input" id="sample-post-url" type="url" placeholder="e.g. https://kishlay-at-code.github.io/partial-existence/posts/mushishi-review" required />
-            <span style="font-size: 0.72rem; color: var(--text-muted);">Auto-maps Likes, Pageviews & Verified Comments section</span>
+          <form id="connect-form" onsubmit="handleRegisterWebsite(event)" style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="form-group">
+              <label class="form-label" for="site-name">Blog / Website Name (Optional)</label>
+              <input class="form-input" id="site-name" type="text" placeholder="e.g. My Personal Reflections" />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="site-url">1. Blog Website URL (Home / Root)</label>
+              <input class="form-input" id="site-url" type="url" placeholder="e.g. https://kishlay-at-code.github.io/partial-existence/" required />
+              <span style="font-size: 0.72rem; color: var(--text-muted);">Maps the top-right Sign In & User Account bar</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="sample-post-url">2. Sample Blog Page URL (Single Post)</label>
+              <input class="form-input" id="sample-post-url" type="url" placeholder="e.g. https://kishlay-at-code.github.io/partial-existence/posts/mushishi-review" required />
+              <span style="font-size: 0.72rem; color: var(--text-muted);">Auto-maps Likes, Pageviews & Verified Comments section</span>
+            </div>
+
+            <button class="btn" id="submit-btn" type="submit">
+              Submit & Request Developer Approval &rarr;
+            </button>
+          </form>
+
+          <div id="submission-result" style="display: none; flex-direction: column; gap: 12px; margin-top: 8px;">
+            <div id="submission-alert" class="alert"></div>
+
+            <label class="form-label">Single-Line Embed Script Tag:</label>
+            <div class="code-box">
+              <button class="copy-btn" onclick="copySnippet('embed-code')">Copy</button>
+              <code id="embed-code"></code>
+            </div>
+          </div>
+        </section>
+
+        <!-- Registered Websites List -->
+        <section class="card">
+          <div class="card__header">
+            <h2 class="card__title">📋 My Connected Blogs</h2>
           </div>
 
-          <button class="btn" id="submit-btn" type="submit">
-            Submit & Request Developer Approval &rarr;
-          </button>
-        </form>
-
-        <div id="submission-result" style="display: none; flex-direction: column; gap: 12px; margin-top: 8px;">
-          <div id="submission-alert" style="padding: 12px; border-radius: 8px; font-size: 0.85rem;"></div>
-
-          <label class="form-label">Single-Line Embed Script Tag:</label>
-          <div class="code-box">
-            <button class="copy-btn" onclick="copySnippet('embed-code')">Copy</button>
-            <code id="embed-code"></code>
+          <div id="websites-list" style="display: flex; flex-direction: column; gap: 12px;">
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Sign in to view and manage your registered websites.</p>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- Card 2: My Connected Websites & Approval Status -->
-      <section class="card">
-        <div class="card__header">
-          <h2 class="card__title">📋 My Connected Blogs</h2>
-        </div>
+      </div>
 
-        <div id="websites-list" style="display: flex; flex-direction: column; gap: 12px;">
-          <p style="font-size: 0.85rem; color: var(--text-muted);">Loading your registered blogs...</p>
-        </div>
-      </section>
+      <!-- Right Column: Blog Owner Account Card -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        
+        <section class="card" id="auth-card">
+          <div class="card__header">
+            <h2 class="card__title" id="auth-card-title">🔐 Blog Owner Account</h2>
+          </div>
+
+          <!-- When Logged In -->
+          <div id="auth-logged-in-view" style="display: none; flex-direction: column; gap: 12px;">
+            <div class="alert alert--success">
+              ✓ Logged in as <strong id="logged-user-name">User</strong>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;" id="logged-user-email">email@example.com</div>
+            </div>
+            <p style="font-size: 0.84rem; color: var(--text-muted);">
+              You are authenticated to connect new blogs and receive developer approval alerts.
+            </p>
+            <button class="btn btn--secondary" onclick="handleSignOut()">Sign Out of Owner Account</button>
+          </div>
+
+          <!-- When Logged Out: On-Page Tabbed Form -->
+          <div id="auth-logged-out-view" style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="tabs">
+              <button type="button" class="tab" id="tab-login-btn" onclick="setAuthTab('login')">Sign In</button>
+              <button type="button" class="tab active" id="tab-register-btn" onclick="setAuthTab('register')">Create Account</button>
+            </div>
+
+            <div id="auth-status-msg" class="alert alert--danger" style="display: none;"></div>
+
+            <form id="auth-form" onsubmit="handleAuthSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">
+              <div class="form-group" id="group-name">
+                <label class="form-label" for="auth-name">Your Display Name</label>
+                <input class="form-input" id="auth-name" type="text" placeholder="e.g. Kishlay" />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="auth-email">Blog Owner Email</label>
+                <input class="form-input" id="auth-email" type="email" placeholder="you@domain.com" required />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="auth-pass">Password (min 6 chars)</label>
+                <input class="form-input" id="auth-pass" type="password" placeholder="••••••••" required minlength="6" />
+              </div>
+
+              <button class="btn" id="auth-submit-btn" type="submit">
+                Create Blog Owner Account &rarr;
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- Information Card -->
+        <section class="card" style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5;">
+          <h3 style="color: #ffffff; font-size: 0.95rem; margin-bottom: 6px;">🛡️ Anti-Bot Protection Rules</h3>
+          <p>
+            To protect your database from automated scrapers and spam comments, all new blog connections undergo 1-click verification by the developer (<a href="mailto:dev.vinyas.one@gmail.com" style="color: var(--accent);">dev.vinyas.one@gmail.com</a>).
+          </p>
+        </section>
+
+      </div>
 
     </main>
 
@@ -276,6 +377,7 @@
     const API_BASE = window.location.origin;
     let currentToken = localStorage.getItem('pe_owner_token') || null;
     let currentUser = null;
+    let currentAuthTab = 'register';
 
     async function checkAuth() {
       if (!currentToken) {
@@ -305,72 +407,125 @@
 
     function updateAuthUI(user) {
       const userDisplay = document.getElementById('user-display');
-      const authBtn = document.getElementById('auth-btn');
-      const loginGate = document.getElementById('login-gate');
+      const headerAuthBtn = document.getElementById('header-auth-btn');
+      const loggedInView = document.getElementById('auth-logged-in-view');
+      const loggedOutView = document.getElementById('auth-logged-out-view');
+      const connUserBanner = document.getElementById('connected-user-banner');
 
       if (user) {
-        userDisplay.innerText = `👤 ${user.name} (${user.email})`;
-        authBtn.innerText = 'Sign Out';
-        loginGate.style.display = 'none';
+        userDisplay.innerText = `👤 ${user.name}`;
+        headerAuthBtn.innerText = 'Sign Out';
+        headerAuthBtn.onclick = handleSignOut;
+
+        loggedInView.style.display = 'flex';
+        loggedOutView.style.display = 'none';
+        connUserBanner.style.display = 'block';
+
+        document.getElementById('logged-user-name').innerText = user.name;
+        document.getElementById('logged-user-email').innerText = user.email;
+        document.getElementById('banner-user-name').innerText = user.name;
+        document.getElementById('banner-user-email').innerText = user.email;
       } else {
-        userDisplay.innerText = 'Not Logged In';
-        authBtn.innerText = 'Blog Owner Login';
-        loginGate.style.display = 'block';
+        userDisplay.innerText = 'Guest (Not Signed In)';
+        headerAuthBtn.innerText = 'Sign In / Register';
+        headerAuthBtn.onclick = focusAuthCard;
+
+        loggedInView.style.display = 'none';
+        loggedOutView.style.display = 'flex';
+        connUserBanner.style.display = 'none';
       }
     }
 
-    function handleAuthAction() {
-      if (currentUser) {
-        localStorage.removeItem('pe_owner_token');
-        currentToken = null;
-        currentUser = null;
-        updateAuthUI(null);
-        loadWebsites();
-        return;
+    function setAuthTab(tab) {
+      currentAuthTab = tab;
+      const groupName = document.getElementById('group-name');
+      const tabLogin = document.getElementById('tab-login-btn');
+      const tabReg = document.getElementById('tab-register-btn');
+      const submitBtn = document.getElementById('auth-submit-btn');
+      const msg = document.getElementById('auth-status-msg');
+      msg.style.display = 'none';
+
+      if (tab === 'login') {
+        tabLogin.classList.add('active');
+        tabReg.classList.remove('active');
+        groupName.style.display = 'none';
+        document.getElementById('auth-name').removeAttribute('required');
+        submitBtn.innerText = 'Sign In to Dashboard →';
+      } else {
+        tabReg.classList.add('active');
+        tabLogin.classList.remove('active');
+        groupName.style.display = 'flex';
+        document.getElementById('auth-name').setAttribute('required', 'true');
+        submitBtn.innerText = 'Create Blog Owner Account →';
       }
+    }
 
-      const email = prompt('Enter your blog owner email:');
-      if (!email) return;
-      const name = prompt('Enter display name:') || 'Blog Owner';
-      const password = prompt('Enter password (min 6 characters):');
-      if (!password) return;
+    function focusAuthCard() {
+      const card = document.getElementById('auth-card');
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('card--highlight');
+      setTimeout(() => card.classList.remove('card--highlight'), 2000);
+      document.getElementById('auth-email').focus();
+    }
 
-      fetch(`${API_BASE}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      })
-      .then(async res => {
-        if (!res.ok) {
-          // Register if account doesn't exist
-          return fetch(`${API_BASE}/api/auth/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, password })
-          });
-        }
-        return res;
-      })
-      .then(r => r.json())
-      .then(data => {
-        if (data.token) {
+    async function handleAuthSubmit(e) {
+      e.preventDefault();
+      const msg = document.getElementById('auth-status-msg');
+      const submitBtn = document.getElementById('auth-submit-btn');
+      msg.style.display = 'none';
+      submitBtn.disabled = true;
+
+      const email = document.getElementById('auth-email').value.trim();
+      const password = document.getElementById('auth-pass').value;
+      const name = document.getElementById('auth-name').value.trim();
+
+      const endpoint = currentAuthTab === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const payload = currentAuthTab === 'login' ? { email, password } : { name, email, password };
+
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        if (res.ok && data.token) {
           currentToken = data.token;
           currentUser = data.user;
           localStorage.setItem('pe_owner_token', data.token);
           updateAuthUI(currentUser);
           loadWebsites();
-          alert(`Logged in successfully as ${currentUser.name}!`);
         } else {
-          alert(`Auth Error: ${data.error || 'Check credentials'}`);
+          msg.className = 'alert alert--danger';
+          msg.innerText = `⚠️ ${data.error || 'Authentication failed'}`;
+          msg.style.display = 'block';
         }
-      });
+      } catch (err) {
+        msg.className = 'alert alert--danger';
+        msg.innerText = `⚠️ Network Error: ${err.message}`;
+        msg.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+    function handleSignOut() {
+      localStorage.removeItem('pe_owner_token');
+      currentToken = null;
+      currentUser = null;
+      updateAuthUI(null);
+      loadWebsites();
     }
 
     async function handleRegisterWebsite(e) {
       e.preventDefault();
       if (!currentUser) {
-        alert('Please log in with your blog owner account before connecting a website.');
-        handleAuthAction();
+        focusAuthCard();
+        const msg = document.getElementById('auth-status-msg');
+        msg.className = 'alert alert--warning';
+        msg.innerText = '👉 Please sign in or create your blog owner account below to connect your website.';
+        msg.style.display = 'block';
         return;
       }
 
@@ -399,14 +554,10 @@
           resBox.style.display = 'flex';
           
           if (data.website.status === 'approved') {
-            alertBox.style.background = 'rgba(74, 222, 128, 0.15)';
-            alertBox.style.color = '#4ade80';
-            alertBox.style.border = '1px solid rgba(74, 222, 128, 0.3)';
+            alertBox.className = 'alert alert--success';
             alertBox.innerHTML = `✅ <strong>Approved & Active!</strong> Embed script is ready.`;
           } else {
-            alertBox.style.background = 'rgba(250, 204, 21, 0.15)';
-            alertBox.style.color = '#facc15';
-            alertBox.style.border = '1px solid rgba(250, 204, 21, 0.3)';
+            alertBox.className = 'alert alert--warning';
             alertBox.innerHTML = `📨 <strong>Verification Sent!</strong> Developer verification email dispatched to <code>${data.developerEmailSentTo}</code>. Your blog will activate once approved.`;
           }
 
@@ -434,7 +585,7 @@
         const websites = data.websites || [];
 
         if (websites.length === 0) {
-          list.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-muted);">No websites registered yet. Submit your blog on the left to get started.</p>`;
+          list.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-muted);">${currentUser ? 'No websites registered yet. Submit your blog above to get started.' : 'Sign in on the right to view and manage your registered websites.'}</p>`;
           return;
         }
 

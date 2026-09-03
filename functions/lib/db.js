@@ -76,6 +76,14 @@ const AUTH_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`
 ];
 
+const MIGRATIONS = [
+  `ALTER TABLE websites ADD COLUMN owner_user_id TEXT;`,
+  `ALTER TABLE websites ADD COLUMN sample_post_url TEXT;`,
+  `ALTER TABLE websites ADD COLUMN post_path_pattern TEXT;`,
+  `ALTER TABLE websites ADD COLUMN status TEXT DEFAULT 'pending';`,
+  `ALTER TABLE websites ADD COLUMN verification_token TEXT;`
+];
+
 /**
  * Get Content & Metrics D1 Database (env.CONTENT_DB or env.DB)
  * @param {object} env - Cloudflare Pages environment
@@ -95,6 +103,13 @@ export async function getContentDb(env) {
         await db.prepare(stmt).run();
       } catch (err) {
         // Table or index may already exist
+      }
+    }
+    for (const mig of MIGRATIONS) {
+      try {
+        await db.prepare(mig).run();
+      } catch (err) {
+        // Column already exists
       }
     }
     isContentSchemaInitialized = true;
