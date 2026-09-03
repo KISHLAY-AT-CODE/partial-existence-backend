@@ -303,6 +303,23 @@
           </div>
         </section>
 
+        <!-- Blog Comments Moderation Card -->
+        <section class="card" id="comments-moderation-card">
+          <div class="card__header">
+            <h2 class="card__title">💬 Moderate Blog Comments</h2>
+            <button class="btn btn--secondary" style="padding: 4px 10px; font-size: 0.74rem;" onclick="loadOwnerComments()">
+              🔄 Refresh
+            </button>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin: -4px 0 6px 0;">
+            Review reflections posted across your blogs. Delete any spam or vulgar comments with 1-click.
+          </p>
+
+          <div id="owner-comments-list" style="display: flex; flex-direction: column; gap: 10px;">
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Sign in to load your blog comments.</p>
+          </div>
+        </section>
+
       </div>
 
       <!-- Right Column: Blog Owner Account Card -->
@@ -693,9 +710,99 @@
       }
     }
 
+    async function loadOwnerComments() {
+      const list = document.getElementById('owner-comments-list');
+      if (!currentToken) {
+        list.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-muted);">Sign in on the right to load comments.</p>`;
+        return;
+      }
+
+      list.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-muted);">Loading comments...</p>`;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/comments?owner=true`, {
+          headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        const data = await res.json();
+        const comments = data.comments || [];
+
+        if (comments.length === 0) {
+          list.innerHTML = `<p style="font-size: 0.85rem; color: var(--text-muted);">No comments posted on your blogs yet.</p>`;
+          return;
+        }
+
+        list.innerHTML = comments.map(c => `
+          <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
+              <div>
+                <strong style="color: var(--accent);">${c.author}</strong>
+                <span style="color: var(--text-muted); margin-left: 6px;">on <code>/${c.slug}</code></span>
+              </div>
+              <button class="btn btn--secondary" style="padding: 3px 8px; font-size: 0.72rem; color: var(--danger); border-color: rgba(239,68,68,0.3);" onclick="handleDeleteComment('${c.id}')">
+                🗑️ Delete
+              </button>
+            </div>
+            <p style="font-size: 0.86rem; color: #ffffff; line-height: 1.4; margin: 2px 0;">"${c.text}"</p>
+            <div style="font-size: 0.7rem; color: #64748b;">Posted: ${new Date(c.date).toLocaleString()} &bull; Blog: ${c.websiteName || c.websiteId}</div>
+          </div>
+        `).join('');
+      } catch (err) {
+        list.innerHTML = `<p style="font-size: 0.85rem; color: var(--danger);">Failed to load comments: ${err.message}</p>`;
+      }
+    }
+
+    async function handleDeleteComment(commentId) {
+      if (!confirm('Are you sure you want to delete this comment? It will be permanently removed from the blog discussion.')) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/comments?id=${encodeURIComponent(commentId)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert('Comment deleted successfully.');
+          loadOwnerComments();
+        } else {
+          alert(`Error: ${data.error || 'Failed to delete comment'}`);
+        }
+      } catch (err) {
+        alert(`Network Error: ${err.message}`);
+      }
+    }
+
     function copySnippet(id) {
       const text = document.getElementById(id).innerText;
       navigator.clipboard.writeText(text).then(() => alert('Copied to clipboard!'));
+    }
+
+    async function checkAuth() {
+      if (!currentToken) {
+        updateAuthUI(null);
+        loadWebsites();
+        loadOwnerComments();
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          updateAuthUI(currentUser);
+        } else {
+          localStorage.removeItem('pe_owner_token');
+          currentToken = null;
+          updateAuthUI(null);
+        }
+      } catch {
+        updateAuthUI(null);
+      }
+      loadWebsites();
+      loadOwnerComments();
     }
 
     checkAuth();

@@ -1,9 +1,9 @@
 /**
  * Endpoint: /api/comments
  * Methods:
- *   GET    (fetch verified comments for a post)
- *   POST   (submit a comment — MANDATORY sign-in required)
- *   DELETE (remove a comment by authenticated author)
+ *   GET    (fetch comments for a post OR fetch all comments for blog owner moderation)
+ *   POST   (submit a comment — MANDATORY sign-in & English/Hindi/Hinglish/Tamil profanity filter)
+ *   DELETE (remove a comment by author OR by verified blog owner/developer)
  * Storage: Cloudflare D1 Database
  */
 
@@ -11,6 +11,8 @@ import { getContentDb } from '../lib/db.js';
 import { jsonResponse, errorResponse } from '../lib/cors.js';
 import { isValidSlug, validateCommentInput } from '../lib/validation.js';
 import { getAuthenticatedUser } from '../lib/auth.js';
+import { checkProfanity } from '../lib/profanity.js';
+import { DEVELOPER_EMAIL } from '../lib/email.js';
 
 async function sha256Hex(str) {
   if (!str) return null;
@@ -23,6 +25,7 @@ async function sha256Hex(str) {
 export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
+  const isOwnerView = url.searchParams.get('owner') === 'true';
   const slug = url.searchParams.get('slug');
   const websiteId =
     request.headers.get('x-website-id') ||
@@ -30,12 +33,53 @@ export async function onRequestGet(context) {
     env?.WEBSITE_ID ||
     'partial-existence';
 
-  if (!slug || !isValidSlug(slug)) {
-    return errorResponse('Valid "slug" query parameter is required', 400, request, env);
-  }
-
   try {
     const db = await getContentDb(env);
+
+    // 1. Blog Owner Moderation View: List all comments on owner's blogs
+    if (isOwnerView) {
+      const authUser = await getAuthenticatedUser(request, env);
+      if (!authUser) {
+        return errorResponse('Unauthorized: Blog owner login required', 401, request, env);
+      }
+
+      let commentsQuery;
+      let params;
+
+      if (authUser.email === DEVELOPER_EMAIL) {
+        // Developer sees comments across all blogs
+        commentsQuery = `
+          SELECT c.id, c.website_id as websiteId, c.slug, c.user_id as userId,
+                 c.author, c.text, c.created_at as date, w.name as websiteName
+          FROM comments c
+          LEFT JOIN websites w ON c.website_id = w.website_id
+          ORDER BY c.created_at DESC
+          LIMIT 100
+        `;
+        params = [];
+      } else {
+        // Blog owner sees comments on their own blogs
+        commentsQuery = `
+          SELECT c.id, c.website_id as websiteId, c.slug, c.user_id as userId,
+                 c.author, c.text, c.created_at as date, w.name as websiteName
+          FROM comments c
+          INNER JOIN websites w ON c.website_id = w.website_id
+          WHERE w.owner_user_id = ? OR w.admin_email = ? OR (c.website_id = 'partial-existence' AND ? = 'partial-existence')
+          ORDER BY c.created_at DESC
+          LIMIT 100
+        `;
+        params = [authUser.userId, authUser.email, websiteId];
+      }
+
+      const results = await db.prepare(commentsQuery).bind(...params).all();
+      return jsonResponse({ comments: results.results || [] }, 200, request, env);
+    }
+
+    // 2. Post Discussion Thread View
+    if (!slug || !isValidSlug(slug)) {
+      return errorResponse('Valid "slug" query parameter is required', 400, request, env);
+    }
+
     const queryResult = await db
       .prepare(
         `SELECT id, slug, user_id as userId, author, is_verified as isVerified,
@@ -114,6 +158,13 @@ export async function onRequestPost(context) {
   }
 
   const { slug, text, subscribeUpdates } = validation.data;
+
+  // 2. Multi-Language Profanity Filter (English, Hindi, Hinglish, Tamil)
+  const profanityCheck = checkProfanity(text);
+  if (profanityCheck.hasProfanity) {
+    return errorResponse(profanityCheck.message, 400, request, env);
+  }
+
   const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const now = new Date().toISOString();
   const emailHash = await sha256Hex(authUser.email);
@@ -188,24 +239,41 @@ export async function onRequestDelete(context) {
     const db = await getContentDb(env);
 
     const targetComment = await db
-      .prepare('SELECT user_id as userId FROM comments WHERE id = ? AND website_id = ?')
-      .bind(id, websiteId)
+      .prepare('SELECT user_id as userId, website_id as websiteId FROM comments WHERE id = ?')
+      .bind(id)
       .first();
 
     if (!targetComment) {
       return errorResponse('Comment not found', 404, request, env);
     }
 
-    if (targetComment.userId !== authUser.userId) {
-      return errorResponse('Forbidden: You can only delete your own comments', 403, request, env);
+    // Check Authorization:
+    // Allowed if:
+    // 1. Author of the comment
+    // 2. Developer (dev.vinyas.one@gmail.com)
+    // 3. Blog Owner of the website where comment is posted
+    const isAuthor = targetComment.userId === authUser.userId;
+    const isDeveloper = authUser.email === DEVELOPER_EMAIL;
+
+    let isBlogOwner = false;
+    if (!isAuthor && !isDeveloper) {
+      const siteOwner = await db
+        .prepare('SELECT 1 FROM websites WHERE website_id = ? AND (owner_user_id = ? OR admin_email = ?)')
+        .bind(targetComment.websiteId, authUser.userId, authUser.email)
+        .first();
+      if (siteOwner) isBlogOwner = true;
+    }
+
+    if (!isAuthor && !isDeveloper && !isBlogOwner) {
+      return errorResponse('Forbidden: You do not have permission to delete this comment', 403, request, env);
     }
 
     await db
-      .prepare('DELETE FROM comments WHERE id = ? AND website_id = ?')
-      .bind(id, websiteId)
+      .prepare('DELETE FROM comments WHERE id = ?')
+      .bind(id)
       .run();
 
-    return jsonResponse({ success: true, message: 'Comment deleted', id }, 200, request, env);
+    return jsonResponse({ success: true, message: 'Comment deleted successfully', id }, 200, request, env);
   } catch (err) {
     return errorResponse(`Database error: ${err.message}`, 500, request, env);
   }
