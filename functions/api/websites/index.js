@@ -201,12 +201,14 @@ export async function onRequestPost(context) {
       });
     }
 
+    const isApproved = initialStatus === 'approved';
+
     return jsonResponse(
       {
         success: true,
-        message: initialStatus === 'approved'
+        message: isApproved
           ? 'Website instantly approved and active!'
-          : `Website submitted for verification. Confirmation email sent to developer (${DEVELOPER_EMAIL}).`,
+          : `Website submitted for verification. Confirmation email sent to developer (${DEVELOPER_EMAIL}). Embed code will unlock upon approval.`,
         website: {
           websiteId,
           name: websiteName,
@@ -217,10 +219,10 @@ export async function onRequestPost(context) {
         },
         developerEmailSentTo: DEVELOPER_EMAIL,
         verificationDetails: emailResult,
-        snippets: {
+        snippets: isApproved ? {
           embedScript: `<script src="${hostUrl}/embed.js" data-website-id="${websiteId}" async></script>`,
           siteConfig: `export const siteConfig = {\n  apiUrl: '${hostUrl}',\n  websiteId: '${websiteId}',\n};`,
-        },
+        } : null,
       },
       201,
       request,

@@ -282,10 +282,12 @@
           <div id="submission-result" style="display: none; flex-direction: column; gap: 12px; margin-top: 8px;">
             <div id="submission-alert" class="alert"></div>
 
-            <label class="form-label">Single-Line Embed Script Tag:</label>
-            <div class="code-box">
-              <button class="copy-btn" onclick="copySnippet('embed-code')">Copy</button>
-              <code id="embed-code"></code>
+            <div id="embed-snippet-group" style="display: none; flex-direction: column; gap: 6px;">
+              <label class="form-label">Single-Line Embed Script Tag (Approved):</label>
+              <div class="code-box">
+                <button class="copy-btn" onclick="copySnippet('embed-code')">Copy</button>
+                <code id="embed-code"></code>
+              </div>
             </div>
           </div>
         </section>
@@ -553,15 +555,19 @@
           const alertBox = document.getElementById('submission-alert');
           resBox.style.display = 'flex';
           
-          if (data.website.status === 'approved') {
+          const snippetGroup = document.getElementById('embed-snippet-group');
+
+          if (data.website.status === 'approved' && data.snippets?.embedScript) {
             alertBox.className = 'alert alert--success';
-            alertBox.innerHTML = `✅ <strong>Approved & Active!</strong> Embed script is ready.`;
+            alertBox.innerHTML = `✅ <strong>Approved & Active!</strong> Your embed script tag is ready to use:`;
+            document.getElementById('embed-code').innerText = data.snippets.embedScript;
+            snippetGroup.style.display = 'flex';
           } else {
             alertBox.className = 'alert alert--warning';
-            alertBox.innerHTML = `📨 <strong>Verification Sent!</strong> Developer verification email dispatched to <code>${data.developerEmailSentTo}</code>. Your blog will activate once approved.`;
+            alertBox.innerHTML = `📨 <strong>Application Submitted for Review:</strong> Your blog connection is currently awaiting developer review (<code>${data.developerEmailSentTo}</code>).<br/><span style="display:inline-block; margin-top:4px; font-weight:600; color:#ffffff;">🔒 Embed script code and API credentials will unlock once approved by the developer.</span>`;
+            snippetGroup.style.display = 'none';
           }
 
-          document.getElementById('embed-code').innerText = data.snippets.embedScript;
           loadWebsites();
         } else {
           alert(`Error: ${data.error || 'Failed to submit website'}`);
