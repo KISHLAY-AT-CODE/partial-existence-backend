@@ -197,7 +197,10 @@ export function checkProfanity(text) {
     return {
       hasProfanity: true,
       detectedWords: uniqueDetected,
-      message: 'Comment rejected: Inappropriate or offensive language detected (English / Hindi / Hinglish / Tamil profanity policy). Please keep discussions respectful.'
+      title: 'Content Policy & Account Warning',
+      message: 'Inappropriate or offensive language was detected in your comment.',
+      warning: 'Warning: Inappropriate or offensive language detected in your reflection. Continued violations will result in your account being permanently blocked.',
+      accountNotice: 'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.'
     };
   }
 

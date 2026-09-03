@@ -175,9 +175,30 @@ export async function onRequestPost(context) {
 
     // 3. Multi-Language Profanity Filter (English, Hindi, Hinglish, Tamil)
     const profanityResult = checkProfanity(text);
-    const isFlagged = profanityResult.hasProfanity;
-    const commentStatus = isFlagged ? 'held_for_review' : 'approved';
-    const flaggedReason = isFlagged ? `Profanity detected: ${profanityResult.detectedWords.join(', ')}` : null;
+    if (profanityResult.hasProfanity) {
+      return jsonResponse(
+        {
+          success: false,
+          isProfanity: true,
+          title: profanityResult.title || 'Content Policy & Account Warning',
+          message: profanityResult.message || 'Inappropriate or offensive language was detected in your comment.',
+          warning:
+            profanityResult.warning ||
+            'Warning: Inappropriate or offensive language detected. Please adhere to community guidelines. Your account will be permanently blocked if this behavior continues.',
+          accountNotice:
+            profanityResult.accountNotice ||
+            'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.',
+          error:
+            profanityResult.warning ||
+            profanityResult.message ||
+            'Warning: Inappropriate or offensive language detected. Continued violations will result in your account being blocked.',
+          detectedWords: profanityResult.detectedWords,
+        },
+        400,
+        request,
+        env
+      );
+    }
 
     const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const now = new Date().toISOString();
@@ -199,8 +220,8 @@ export async function onRequestPost(context) {
         subscribeUpdates ? 1 : 0,
         text,
         authUser.userId,
-        commentStatus,
-        flaggedReason,
+        'approved',
+        null,
         now
       )
       .run();
@@ -208,11 +229,8 @@ export async function onRequestPost(context) {
     return jsonResponse(
       {
         success: true,
-        heldForReview: isFlagged,
-        message: isFlagged
-          ? 'Your reflection was flagged for potential profanity and is held for review by the blog author before appearing publicly.'
-          : 'Reflection posted successfully.',
-        comment: isFlagged ? null : {
+        message: 'Reflection posted successfully.',
+        comment: {
           id: commentId,
           slug,
           userId: authUser.userId,

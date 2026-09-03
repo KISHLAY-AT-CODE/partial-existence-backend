@@ -8,6 +8,7 @@
 import http from 'http';
 import crypto from 'crypto';
 import { MongoClient } from 'mongodb';
+import { checkProfanity } from './functions/lib/profanity.js';
 
 // Load .env if present
 try {
@@ -536,6 +537,33 @@ const server = http.createServer(async (req, res) => {
         const { slug, author, text, email, subscribeUpdates, authorToken, recaptchaToken } = body;
         if (!slug || !text?.trim()) {
           return sendError(res, 'Valid "slug" and comment "text" are required', 400, origin);
+        }
+
+        // Profanity Check & Account Warning
+        const profanityResult = checkProfanity(text);
+        if (profanityResult.hasProfanity) {
+          return sendJson(
+            res,
+            {
+              success: false,
+              isProfanity: true,
+              title: profanityResult.title || 'Content Policy & Account Warning',
+              message: profanityResult.message || 'Inappropriate or offensive language was detected in your comment.',
+              warning:
+                profanityResult.warning ||
+                'Warning: Inappropriate or offensive language detected. Please adhere to community guidelines. Your account will be permanently blocked if this behavior continues.',
+              accountNotice:
+                profanityResult.accountNotice ||
+                'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.',
+              error:
+                profanityResult.warning ||
+                profanityResult.message ||
+                'Warning: Inappropriate or offensive language detected. Continued violations will result in your account being blocked.',
+              detectedWords: profanityResult.detectedWords,
+            },
+            400,
+            origin
+          );
         }
 
         // If not authenticated, require reCAPTCHA
