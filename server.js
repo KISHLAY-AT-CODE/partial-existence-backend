@@ -6,9 +6,16 @@
  */
 
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { MongoClient } from 'mongodb';
 import { detectProfanity3Stage, checkProfanity } from './functions/lib/profanity.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // Load .env if present
 try {
@@ -728,6 +735,98 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // --- WEBSITES SAAS MANAGEMENT ---
+    if (pathname === '/api/websites') {
+      if (req.method === 'GET') {
+        const qWebId = url.searchParams.get('websiteId');
+        if (qWebId) {
+          const site = await websitesCol.findOne({ websiteId: qWebId });
+          if (!site) return sendJson(res, { websiteId: qWebId, isRegistered: false }, 200, origin);
+          return sendJson(res, { ...site, isRegistered: true }, 200, origin);
+        }
+
+        if (authUser) {
+          const isDev = authUser.email === 'dev.vinyas.one@gmail.com';
+          const query = isDev ? {} : { $or: [{ ownerUserId: authUser.userId }, { adminEmail: authUser.email }, { websiteId: 'partial-existence' }] };
+          const sites = await websitesCol.find(query).sort({ createdAt: -1 }).toArray();
+          return sendJson(res, { websites: sites, isDeveloper: isDev }, 200, origin);
+        }
+
+        return sendJson(res, { websites: [] }, 200, origin);
+      }
+
+      if (req.method === 'POST') {
+        if (!authUser) return sendError(res, 'Authentication required to connect a website', 401, origin);
+        const body = await parseBody(req);
+        const { url: rawUrl, samplePostUrl: rawPostUrl, name: rawName, websiteId: customId } = body;
+        if (!rawUrl) return sendError(res, 'Website URL required', 400, origin);
+
+        const initialStatus = (customId === 'partial-existence' || authUser.email === 'dev.vinyas.one@gmail.com') ? 'approved' : 'pending';
+        const now = new Date();
+        const siteDoc = {
+          websiteId: customId || `blog-${Date.now()}`,
+          ownerUserId: authUser.userId,
+          name: rawName || 'My Blog',
+          url: rawUrl,
+          samplePostUrl: rawPostUrl || rawUrl,
+          adminEmail: authUser.email,
+          status: initialStatus,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        await websitesCol.updateOne({ websiteId: siteDoc.websiteId }, { $set: siteDoc }, { upsert: true });
+        return sendJson(res, { success: true, website: siteDoc }, 201, origin);
+      }
+
+      if (req.method === 'DELETE') {
+        if (!authUser) return sendError(res, 'Authentication required', 401, origin);
+        const body = await parseBody(req);
+        const targetId = body.websiteId || url.searchParams.get('websiteId');
+        if (!targetId) return sendError(res, 'Missing websiteId', 400, origin);
+
+        const isDev = authUser.email === 'dev.vinyas.one@gmail.com';
+        const site = await websitesCol.findOne({ websiteId: targetId });
+        if (!site) return sendError(res, 'Website not found', 404, origin);
+        if (!isDev && site.ownerUserId !== authUser.userId && site.adminEmail !== authUser.email) {
+          return sendError(res, 'Forbidden: You can only delete your own websites', 403, origin);
+        }
+
+        await websitesCol.deleteOne({ websiteId: targetId });
+        return sendJson(res, { success: true, websiteId: targetId, message: `Website proposal "${targetId}" deleted from database` }, 200, origin);
+      }
+    }
+
+    // --- DEVELOPER ADMIN REVIEW ---
+    if (pathname === '/api/admin/review') {
+      if (!authUser || authUser.email !== 'dev.vinyas.one@gmail.com') {
+        return sendError(res, 'Forbidden: Developer access required', 403, origin);
+      }
+
+      if (req.method === 'POST') {
+        const body = await parseBody(req);
+        const { websiteId: targetId, action } = body;
+        if (!targetId || !action) return sendError(res, 'websiteId and action required', 400, origin);
+
+        const act = action.toLowerCase();
+        if (act === 'delete') {
+          await websitesCol.deleteOne({ websiteId: targetId });
+          return sendJson(res, { success: true, websiteId: targetId, status: 'deleted', message: `Proposal "${targetId}" deleted from database` }, 200, origin);
+        }
+
+        const newStatus = act === 'approve' ? 'approved' : 'rejected';
+        await websitesCol.updateOne({ websiteId: targetId }, { $set: { status: newStatus, updatedAt: new Date() } });
+        return sendJson(res, { success: true, websiteId: targetId, status: newStatus, message: `Website "${targetId}" marked as ${newStatus}` }, 200, origin);
+      }
+
+      if (req.method === 'DELETE') {
+        const targetId = url.searchParams.get('websiteId');
+        if (!targetId) return sendError(res, 'Missing websiteId', 400, origin);
+        await websitesCol.deleteOne({ websiteId: targetId });
+        return sendJson(res, { success: true, websiteId: targetId, status: 'deleted', message: `Website "${targetId}" deleted from database` }, 200, origin);
+      }
+    }
+
     // --- STATS ---
     if (pathname === '/api/stats' && req.method === 'GET') {
       const websiteDoc = await websitesCol.findOne({ websiteId });
@@ -759,8 +858,32 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
-    // Root status
-    if (pathname === '/') {
+    // Serve static files from public/ (e.g., AGENT_WILL_INTEGRATE.md, embed.js, index.html)
+    if (req.method === 'GET') {
+      let targetFile = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '');
+      const filePath = path.join(PUBLIC_DIR, targetFile);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentTypes = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'application/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8',
+          '.md': 'text/markdown; charset=utf-8',
+          '.json': 'application/json; charset=utf-8',
+          '.svg': 'image/svg+xml',
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.ico': 'image/x-icon',
+        };
+        const contentType = contentTypes[ext] || 'text/plain; charset=utf-8';
+        setCorsHeaders(res, origin);
+        res.writeHead(200, { 'Content-Type': contentType });
+        return fs.createReadStream(filePath).pipe(res);
+      }
+    }
+
+    // Root status fallback
+    if (pathname === '/api/status') {
       return sendJson(
         res,
         {

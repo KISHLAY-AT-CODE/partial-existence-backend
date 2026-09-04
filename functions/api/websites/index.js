@@ -232,3 +232,58 @@ export async function onRequestPost(context) {
     return errorResponse(`Registration error: ${err.message}`, 500, request, env);
   }
 }
+
+export async function onRequestDelete(context) {
+  const { request, env } = context;
+  const authUser = await getAuthenticatedUser(request, env);
+
+  if (!authUser) {
+    return errorResponse('Authentication required to delete website proposal.', 401, request, env);
+  }
+
+  const url = new URL(request.url);
+  let websiteId = url.searchParams.get('websiteId');
+
+  if (!websiteId) {
+    try {
+      const body = await request.json();
+      websiteId = body.websiteId;
+    } catch {}
+  }
+
+  if (!websiteId) {
+    return errorResponse('websiteId is required', 400, request, env);
+  }
+
+  try {
+    const db = await getContentDb(env);
+    const isDev = authUser.email === DEVELOPER_EMAIL;
+
+    const site = await db
+      .prepare('SELECT website_id as websiteId, owner_user_id as ownerUserId, admin_email as adminEmail FROM websites WHERE website_id = ?')
+      .bind(websiteId)
+      .first();
+
+    if (!site) {
+      return errorResponse('Website proposal not found in database', 404, request, env);
+    }
+
+    if (!isDev && site.ownerUserId !== authUser.userId && site.adminEmail !== authUser.email) {
+      return errorResponse('Unauthorized: You can only delete your own websites.', 403, request, env);
+    }
+
+    await db.prepare('DELETE FROM websites WHERE website_id = ?').bind(websiteId).run();
+    await db.prepare('DELETE FROM comments WHERE website_id = ?').bind(websiteId).run().catch(() => {});
+    await db.prepare('DELETE FROM pageviews WHERE website_id = ?').bind(websiteId).run().catch(() => {});
+    await db.prepare('DELETE FROM likes WHERE website_id = ?').bind(websiteId).run().catch(() => {});
+    await db.prepare('DELETE FROM blocked_users WHERE website_id = ?').bind(websiteId).run().catch(() => {});
+
+    return jsonResponse({
+      success: true,
+      websiteId,
+      message: `Website proposal "${websiteId}" deleted successfully from backend database.`
+    }, 200, request, env);
+  } catch (err) {
+    return errorResponse(`Database error: ${err.message}`, 500, request, env);
+  }
+}

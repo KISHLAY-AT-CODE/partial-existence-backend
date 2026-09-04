@@ -195,6 +195,7 @@
     .status-pill--approved { background: rgba(74, 222, 128, 0.15); color: var(--success); border: 1px solid rgba(74, 222, 128, 0.3); }
     .status-pill--pending { background: rgba(250, 204, 21, 0.15); color: var(--warning); border: 1px solid rgba(250, 204, 21, 0.3); }
     .status-pill--rejected { background: rgba(248, 113, 113, 0.15); color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.3); }
+    .status-pill--revoked { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.45); }
 
     /* Website Item */
     .site-item {
@@ -282,11 +283,19 @@
           <div id="submission-result" style="display: none; flex-direction: column; gap: 12px; margin-top: 8px;">
             <div id="submission-alert" class="alert"></div>
 
-            <div id="embed-snippet-group" style="display: none; flex-direction: column; gap: 6px;">
+            <div id="embed-snippet-group" style="display: none; flex-direction: column; gap: 8px;">
               <label class="form-label">Single-Line Embed Script Tag (Approved):</label>
               <div class="code-box">
                 <button class="copy-btn" onclick="copySnippet('embed-code')">Copy</button>
                 <code id="embed-code"></code>
+              </div>
+              <div style="display: flex; gap: 10px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
+                <a href="/AGENT_WILL_INTEGRATE.md" download="AGENT_WILL_INTEGRATE.md" class="btn btn--secondary" style="padding: 6px 14px; font-size: 0.78rem; color: var(--accent); border-color: rgba(160, 192, 64, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                  📥 Download AGENT_WILL_INTEGRATE.md (AI & Human Guide)
+                </a>
+                <a href="/AGENT_WILL_INTEGRATE.md" target="_blank" style="font-size: 0.74rem; color: var(--text-muted); text-decoration: underline;">
+                  View Integration Specs ↗
+                </a>
               </div>
             </div>
           </div>
@@ -645,7 +654,7 @@
               <div style="display: flex; align-items: center; justify-content: space-between;">
                 <strong style="color: #ffffff; font-size: 0.95rem;">${site.name}</strong>
                 <span class="status-pill status-pill--${site.status || 'pending'}">
-                  ${site.status === 'approved' ? '✓ Approved' : site.status === 'rejected' ? '✗ Rejected' : '⏳ Pending Review'}
+                  ${site.status === 'approved' ? '✓ Approved & Active' : site.status === 'revoked' ? '🔒 Access Revoked' : site.status === 'rejected' ? '✗ Rejected' : '⏳ Pending Review'}
                 </span>
               </div>
               <div style="font-size: 0.78rem; color: var(--text-muted); word-break: break-all;">
@@ -658,25 +667,58 @@
                 <div class="code-box" style="margin-top: 4px; font-size: 0.72rem;">
                   <code>&lt;script src="${API_BASE}/embed.js" data-website-id="${site.websiteId}" async&gt;&lt;/script&gt;</code>
                 </div>
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
+                  <a href="${API_BASE}/AGENT_WILL_INTEGRATE.md" download="AGENT_WILL_INTEGRATE.md" class="btn btn--secondary" style="padding: 4px 10px; font-size: 0.74rem; color: #a0c040; border-color: rgba(160, 192, 64, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                    📥 Download AGENT_WILL_INTEGRATE.md
+                  </a>
+                  <a href="${API_BASE}/AGENT_WILL_INTEGRATE.md" target="_blank" style="font-size: 0.72rem; color: var(--text-muted); text-decoration: underline;">
+                    View Integration Specs ↗
+                  </a>
+                </div>
+              ` : site.status === 'revoked' ? `
+                <div style="font-size: 0.72rem; color: #fca5a5; background: rgba(239,68,68,0.12); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(239,68,68,0.3); margin-top: 2px;">
+                  🔒 <strong>Access Revoked by Developer:</strong> Live comments, likes, and embed widgets are suspended for this website.
+                </div>
+              ` : site.status === 'rejected' ? `
+                <div style="font-size: 0.72rem; color: var(--danger); margin-top: 2px;">
+                  ✗ Connection Rejected by Developer.
+                </div>
               ` : `
                 <div style="font-size: 0.72rem; color: var(--warning); margin-top: 2px;">
-                  Awaiting approval by developer (dev.vinyas.one@gmail.com)
+                  ⏳ Awaiting approval by developer (dev.vinyas.one@gmail.com)
                 </div>
               `}
 
               ${isDev ? `
-                <div style="display: flex; gap: 8px; margin-top: 8px; border-top: 1px solid var(--card-border); padding-top: 8px;">
-                  <button class="btn" style="padding: 5px 12px; font-size: 0.76rem;" onclick="handleDeveloperReview('${site.websiteId}', 'approve')">
-                    ✓ Confirm & Approve
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; border-top: 1px solid var(--card-border); padding-top: 8px; align-items: center;">
+                  ${site.status === 'approved' ? `
+                    <button class="btn btn--secondary" style="padding: 5px 12px; font-size: 0.76rem; color: #fca5a5; border-color: rgba(239,68,68,0.4);" onclick="handleDeveloperReview('${site.websiteId}', 'revoke')">
+                      🔒 Revoke Access
+                    </button>
+                  ` : `
+                    <button class="btn" style="padding: 5px 12px; font-size: 0.76rem;" onclick="handleDeveloperReview('${site.websiteId}', 'grant')">
+                      🔓 Grant Access
+                    </button>
+                  `}
+                  ${site.status === 'pending' ? `
+                    <button class="btn btn--secondary" style="padding: 5px 12px; font-size: 0.76rem; color: var(--warning); border-color: rgba(250,204,21,0.3);" onclick="handleDeveloperReview('${site.websiteId}', 'reject')">
+                      ✗ Reject
+                    </button>
+                  ` : ''}
+                  <button class="btn btn--secondary" style="padding: 5px 12px; font-size: 0.76rem; color: var(--danger); border-color: rgba(239,68,68,0.4);" onclick="handleDeleteWebsiteProposal('${site.websiteId}', '${site.name}')">
+                    🗑️ Delete from Database
                   </button>
-                  <button class="btn btn--secondary" style="padding: 5px 12px; font-size: 0.76rem; color: var(--danger); border-color: rgba(239,68,68,0.3);" onclick="handleDeveloperReview('${site.websiteId}', 'reject')">
-                    ✗ Reject
-                  </button>
-                  <a href="${API_BASE}/api/admin/review?action=approve&websiteId=${site.websiteId}" target="_blank" style="font-size: 0.72rem; color: var(--text-muted); align-self: center; margin-left: auto;">
+                  <a href="${API_BASE}/api/admin/review?action=${site.status === 'approved' ? 'revoke' : 'grant'}&websiteId=${site.websiteId}" target="_blank" style="font-size: 0.72rem; color: var(--text-muted); margin-left: auto;">
                     Direct Link ↗
                   </a>
                 </div>
-              ` : ''}
+              ` : `
+                <div style="display: flex; gap: 8px; margin-top: 8px; border-top: 1px solid var(--card-border); padding-top: 8px;">
+                  <button class="btn btn--secondary" style="padding: 4px 10px; font-size: 0.74rem; color: var(--danger); border-color: rgba(239,68,68,0.3); margin-left: auto;" onclick="handleDeleteWebsiteProposal('${site.websiteId}', '${site.name}')">
+                    🗑️ Delete Blog
+                  </button>
+                </div>
+              `}
             </div>
           `).join('')}
         `;
@@ -704,6 +746,31 @@
           loadWebsites();
         } else {
           alert(`Review Error: ${data.error || 'Failed to review website'}`);
+        }
+      } catch (err) {
+        alert(`Network Error: ${err.message}`);
+      }
+    }
+
+    async function handleDeleteWebsiteProposal(websiteId, siteName) {
+      const promptName = siteName || websiteId;
+      if (!confirm(`⚠️ PERMANENT DATABASE DELETION:\n\nAre you sure you want to permanently delete proposal / website "${promptName}" (${websiteId}) from the backend database?\n\nThis will remove the registration and all associated blog data.`)) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/websites?websiteId=${encodeURIComponent(websiteId)}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${currentToken}`
+          }
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert(`✓ Website proposal "${websiteId}" has been permanently deleted from the database.`);
+          loadWebsites();
+        } else {
+          alert(`Deletion Error: ${data.error || 'Failed to delete website proposal'}`);
         }
       } catch (err) {
         alert(`Network Error: ${err.message}`);
