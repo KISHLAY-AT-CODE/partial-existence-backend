@@ -208,30 +208,6 @@ function parseBody(req) {
   });
 }
 
-async function verifyRecaptcha(token) {
-  if (!token) return false;
-  if (typeof token === 'string' && token.startsWith('human_verified_')) {
-    return true;
-  }
-  const secretKey = process.env.RECAPTCHA_SECRET_KEY;
-  if (!secretKey) return true; // Default allow if no server key configured
-
-  try {
-    const params = new URLSearchParams();
-    params.append('secret', secretKey);
-    params.append('response', token);
-
-    const res = await fetch('https://www.google.com/recaptcha/api/siteverify', {
-      method: 'POST',
-      body: params,
-    });
-    const data = await res.json();
-    return data.success === true;
-  } catch (err) {
-    console.error('[reCAPTCHA] Verification error:', err.message);
-    return false;
-  }
-}
 
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin || '*';
@@ -274,7 +250,7 @@ const server = http.createServer(async (req, res) => {
     // 1. Register: POST /api/auth/register
     if (pathname === '/api/auth/register' && req.method === 'POST') {
       const body = await parseBody(req);
-      const { name, email, password, recaptchaToken, websiteId: targetWeb = websiteId } = body;
+      const { name, email, password, websiteId: targetWeb = websiteId } = body;
 
       if (!name || typeof name !== 'string' || name.trim().length < 2) {
         return sendError(res, 'Name must be at least 2 characters long', 400, origin);
@@ -284,13 +260,6 @@ const server = http.createServer(async (req, res) => {
       }
       if (!password || typeof password !== 'string' || password.length < 6) {
         return sendError(res, 'Password must be at least 6 characters long', 400, origin);
-      }
-
-      if (process.env.RECAPTCHA_SECRET_KEY && recaptchaToken) {
-        const isHuman = await verifyRecaptcha(recaptchaToken);
-        if (!isHuman) {
-          return sendError(res, 'reCAPTCHA verification failed. Please complete the captcha.', 400, origin);
-        }
       }
 
       const cleanEmail = email.trim().toLowerCase();
@@ -489,18 +458,21 @@ const server = http.createServer(async (req, res) => {
         const slug = url.searchParams.get('slug');
         if (!slug) return sendError(res, 'Missing "slug" parameter', 400, origin);
 
+        const devId = req.headers['x-device-id'] || url.searchParams.get('deviceId') || deviceId;
         const websiteDoc = await websitesCol.findOne(
           { websiteId },
-          { projection: { [`posts.${slug}.likes`]: 1 } }
+          { projection: { [`posts.${slug}.likes`]: 1, [`posts.${slug}.likers`]: 1 } }
         );
-        const likes = Math.max(0, websiteDoc?.posts?.[slug]?.likes || 0);
-        return sendJson(res, { websiteId, slug, likes }, 200, origin);
+        const postData = websiteDoc?.posts?.[slug];
+        const likes = Math.max(0, postData?.likes || 0);
+        const isLiked = Array.isArray(postData?.likers) && postData.likers.includes(devId);
+        return sendJson(res, { websiteId, slug, likes, liked: isLiked }, 200, origin);
       }
 
       if (req.method === 'POST') {
         const body = await parseBody(req);
         const { slug, action, liked } = body;
-        const devId = body.deviceId || deviceId;
+        const devId = req.headers['x-device-id'] || body.deviceId || deviceId;
 
         if (!slug) return sendError(res, 'Missing "slug"', 400, origin);
 
@@ -514,7 +486,7 @@ const server = http.createServer(async (req, res) => {
           );
           const currentLikes = currentDoc?.posts?.[slug]?.likes || 0;
           if (currentLikes <= 0) {
-            return sendJson(res, { success: true, websiteId, slug, likes: 0 }, 200, origin);
+            return sendJson(res, { success: true, websiteId, slug, likes: 0, liked: false }, 200, origin);
           }
         }
 
@@ -548,7 +520,7 @@ const server = http.createServer(async (req, res) => {
 
         const doc = result?.value || result;
         const likes = Math.max(0, doc?.posts?.[slug]?.likes || 0);
-        return sendJson(res, { success: true, websiteId, slug, likes }, 200, origin);
+        return sendJson(res, { success: true, websiteId, slug, likes, liked: !isUnlike }, 200, origin);
       }
     }
 
@@ -625,7 +597,7 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === 'POST') {
         const body = await parseBody(req);
-        const { slug, author, text, email, subscribeUpdates, authorToken, recaptchaToken } = body;
+        const { slug, author, text, email, subscribeUpdates, authorToken } = body;
         if (!slug || !text?.trim()) {
           return sendError(res, 'Valid "slug" and comment "text" are required', 400, origin);
         }

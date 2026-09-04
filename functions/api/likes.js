@@ -18,6 +18,11 @@ export async function onRequestGet(context) {
     env?.WEBSITE_ID ||
     'partial-existence';
 
+  const deviceId =
+    request.headers.get('x-device-id') ||
+    url.searchParams.get('deviceId') ||
+    '';
+
   if (!slug || !isValidSlug(slug)) {
     return errorResponse('Valid "slug" parameter is required', 400, request, env);
   }
@@ -31,11 +36,25 @@ export async function onRequestGet(context) {
 
     const likes = row ? Math.max(0, Number(row.likes || 0)) : 0;
 
+    let hasLiked = false;
+    if (deviceId) {
+      try {
+        const liker = await db
+          .prepare('SELECT 1 FROM likers WHERE website_id = ? AND slug = ? AND device_id = ?')
+          .bind(websiteId, slug, deviceId)
+          .first();
+        hasLiked = Boolean(liker);
+      } catch {
+        // Ignore likers query error
+      }
+    }
+
     return jsonResponse(
       {
         websiteId,
         slug,
         likes,
+        liked: hasLiked,
       },
       200,
       request,
@@ -125,6 +144,7 @@ export async function onRequestPost(context) {
         websiteId,
         slug,
         likes: updatedLikes,
+        liked: !isUnlike,
       },
       200,
       request,
