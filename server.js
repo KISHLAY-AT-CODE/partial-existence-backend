@@ -23,7 +23,27 @@ try {
     process.loadEnvFile(new URL('.env', import.meta.url));
   }
 } catch {
-  // Ignore if .env is missing or already set in process.env
+  // Ignore if process.loadEnvFile threw
+}
+
+// Fallback .env parser to guarantee PROFANITY_1 / PROFANITY_2 / DB keys are present
+try {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+      const [k, ...vParts] = trimmed.split('=');
+      const kTrim = k.trim();
+      const vTrim = vParts.join('=').trim().replace(/^["']|["']$/g, '');
+      if (!process.env[kTrim]) {
+        process.env[kTrim] = vTrim;
+      }
+    }
+  }
+} catch (e) {
+  console.debug('[Server] .env parse notice:', e.message);
 }
 
 const PORT = process.env.PORT || 5000;

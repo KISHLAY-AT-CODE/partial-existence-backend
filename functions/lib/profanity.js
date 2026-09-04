@@ -188,116 +188,157 @@ export function checkProfanityStage1(text) {
 
 let aiKeyRotationIndex = 0;
 
-/**
- * Retrieves AI API keys from environment (Node process.env or Cloudflare env)
- */
-function getAiApiKeys(env) {
-  const keys = [];
-  const key1 = (typeof process !== 'undefined' && process?.env?.PROFANITY_1) || env?.PROFANITY_1;
-  const key2 = (typeof process !== 'undefined' && process?.env?.PROFANITY_2) || env?.PROFANITY_2;
 
-  if (key1 && key1.trim()) keys.push(key1.trim());
-  if (key2 && key2.trim()) keys.push(key2.trim());
-
-  return keys;
-}
 
 /**
  * Calls Gemini / AI Content Moderation endpoint with a specific key (Ultra-low token footprint)
  */
 async function callAiModerationEndpoint(apiKey, text) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s timeout
+  const prompt = `You are a content safety moderation AI. Analyze if the following text contains any vulgarity, curse words, sexual insults, abusive slurs, profanity, or harassment in any language (English, Hindi, Hinglish, Tamil, etc.).
+If ANY profanity or offensive language is found, respond ONLY with: {"verdict": "DISAPPROVED"}
+If completely clean and safe, respond ONLY with: {"verdict": "APPROVED"}
 
-  try {
-    const prompt = `Evaluate if this comment contains profanity, hate speech, vulgarity, or abuse in any language.
-Respond with JSON: {"verdict": "APPROVED"} or {"verdict": "DISAPPROVED"}.
+Text: """${text.replace(/"/g, '\\"')}"""`;
 
-Comment: """${text.replace(/"/g, '\\"')}"""`;
+  const payload = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.0,
+      maxOutputTokens: 16,
+      responseMimeType: 'application/json'
+    }
+  };
 
-    // Try models in order: gemini-flash-latest, gemini-2.0-flash, gemini-1.5-flash-latest
-    const candidateModels = ['gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-pro'];
-    let response = null;
-    let lastErrText = '';
+  const candidateModels = [
+    'gemini-flash-lite-latest',
+    'gemini-2.0-flash',
+    'gemini-flash-latest',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+    'gemini-pro'
+  ];
 
-    for (const model of candidateModels) {
+  let lastErr = null;
+
+  for (const model of candidateModels) {
+    for (const v of ['v1beta', 'v1']) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s per attempt
       try {
-        response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/${v}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             signal: controller.signal,
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: prompt }] }],
-              generationConfig: {
-                temperature: 0.0,
-                maxOutputTokens: 16,
-                responseMimeType: 'application/json'
-              }
-            })
+            body: JSON.stringify(payload)
           }
         );
 
-        if (response.ok) {
-          break;
-        } else if (response.status === 404) {
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errBody = await response.text().catch(() => '');
+          lastErr = `HTTP ${response.status} (${model}/${v}): ${errBody.slice(0, 100)}`;
           continue;
-        } else {
-          lastErrText = await response.text().catch(() => '');
-          break;
         }
+
+        const data = await response.json();
+
+        // 1. Check if Gemini Safety Filters blocked the prompt directly
+        const promptFeedback = data.promptFeedback || {};
+        if (promptFeedback.blockReason) {
+          return {
+            success: true,
+            isProfane: true,
+            verdict: 'DISAPPROVED',
+            reason: `Safety filter blocked: ${promptFeedback.blockReason}`
+          };
+        }
+
+        // 2. Check candidate finishReason
+        const candidate = data.candidates?.[0] || {};
+        const finishReason = candidate.finishReason || '';
+        if (['SAFETY', 'BLOCK', 'BLOCKED', 'PROHIBITED_CONTENT', 'SPII'].includes(finishReason)) {
+          return {
+            success: true,
+            isProfane: true,
+            verdict: 'DISAPPROVED',
+            reason: `Blocked by finishReason: ${finishReason}`
+          };
+        }
+
+        const candidateText =
+          candidate?.content?.parts?.[0]?.text ||
+          candidate?.output ||
+          '';
+
+        const isDisapproved = candidateText.toUpperCase().includes('DISAPPROVED');
+
+        return {
+          success: true,
+          isProfane: isDisapproved,
+          verdict: isDisapproved ? 'DISAPPROVED' : 'APPROVED',
+          model: `${model} (${v})`
+        };
       } catch (err) {
-        if (controller.signal.aborted) throw err;
-        lastErrText = err.message;
+        clearTimeout(timeoutId);
+        lastErr = err.name === 'AbortError' ? `Timeout (${model}/${v})` : err.message;
+        continue;
       }
     }
-
-    clearTimeout(timeoutId);
-
-    if (!response || !response.ok) {
-      throw new Error(`AI API error: ${lastErrText.slice(0, 120)}`);
-    }
-
-    const data = await response.json();
-    const candidateText =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      data?.candidates?.[0]?.output ||
-      '';
-
-    if (!candidateText) {
-      throw new Error('Empty AI response candidate');
-    }
-
-    const cleanVerdict = candidateText.trim().toUpperCase();
-    const isProfane = cleanVerdict.includes('DISAPPROVED');
-
-    return {
-      success: true,
-      isProfane,
-      verdict: isProfane ? 'DISAPPROVED' : 'APPROVED'
-    };
-  } catch (err) {
-    clearTimeout(timeoutId);
-    throw err;
   }
+
+  throw new Error(lastErr || 'All AI models/versions failed');
 }
 
 /**
- * STAGE 2: AI Verification with primary key priority and failover-only rotation
+ * Retrieves AI API keys from environment (Node process.env or Cloudflare env)
+ */
+function getAiApiKeys(env) {
+  const keys = [];
+  const source = { ...(typeof process !== 'undefined' ? process.env : {}), ...env };
+  
+  // Look for PROFANITY_1, PROFANITY_2, PROFANITY_3, ...
+  for (let i = 1; i <= 10; i++) {
+    const k = source[`PROFANITY_${i}`];
+    if (k && k.trim()) keys.push(k.trim());
+  }
+
+  // Also check generic GEMINI_API_KEY or PROFANITY_API_KEY
+  if (source.GEMINI_API_KEY && source.GEMINI_API_KEY.trim()) keys.push(source.GEMINI_API_KEY.trim());
+  if (source.PROFANITY_API_KEY && source.PROFANITY_API_KEY.trim()) keys.push(source.PROFANITY_API_KEY.trim());
+
+  return Array.from(new Set(keys));
+}
+
+/**
+ * STAGE 2: AI Verification with key rotation across all available keys
+ * If all keys error out, flags server as busy rather than allowing unverified comments through.
  * @param {string} text
  * @param {object} env - Cloudflare env or process.env container
- * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number, skipped?: boolean }>}
+ * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number, isServerBusy?: boolean, message?: string, warning?: string, title?: string, accountNotice?: string }>}
  */
 export async function checkProfanityStage2(text, env = {}) {
   const keys = getAiApiKeys(env);
 
   if (keys.length === 0) {
-    console.debug('[Profanity Stage 2] No AI API keys configured (PROFANITY_1 / PROFANITY_2). Skipping gracefully to Stage 3.');
-    return { hasProfanity: false, detectedWords: [], stage: 2, skipped: true };
+    console.warn('[Profanity Stage 2] No AI keys configured. Flagging detection server busy.');
+    return {
+      hasProfanity: true,
+      isServerBusy: true,
+      stage: 2,
+      detectedWords: [],
+      title: 'Detection Server Busy',
+      message: 'The detection server is busy, we will post this comment when it comes online.',
+      warning: 'The detection server is busy, we will post this comment when it comes online.',
+      accountNotice: 'Content moderation services are currently unavailable. Your comment will be verified once services resume.'
+    };
   }
 
-  // Use primary key first; only failover to secondary key on errors (saves tokens & rate limits)
+  let lastErrorMsg = '';
+
+  // Rotate through all configured keys
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
     try {
@@ -310,7 +351,7 @@ export async function checkProfanityStage2(text, env = {}) {
           stage: 2
         };
       }
-      // AI evaluated successfully and found text clean
+      // AI evaluated successfully and confirmed comment is clean
       return {
         hasProfanity: false,
         detectedWords: [],
@@ -318,17 +359,22 @@ export async function checkProfanityStage2(text, env = {}) {
         stage: 2
       };
     } catch (err) {
-      console.warn(`[Profanity Stage 2] Primary Key #${i + 1} failed: ${err.message}. Failing over to backup key...`);
+      lastErrorMsg = err.message;
+      console.warn(`[Profanity Stage 2] Key #${i + 1} error: ${err.message}. ${i + 1 < keys.length ? 'Rotating to next key...' : 'All keys exhausted.'}`);
     }
   }
 
-  // All AI keys experienced errors: skip Stage 2 gracefully and move to Stage 3
-  console.warn('[Profanity Stage 2] All AI keys failed or timed out. Skipping Stage 2 gracefully to Stage 3.');
+  // If all keys failed with errors, do not silently approve unverified content
+  console.warn(`[Profanity Stage 2] All AI keys failed. Reason: ${lastErrorMsg}`);
   return {
-    hasProfanity: false,
-    detectedWords: [],
+    hasProfanity: true,
+    isServerBusy: true,
     stage: 2,
-    skipped: true
+    detectedWords: [],
+    title: 'Detection Server Busy',
+    message: 'The detection server is busy, we will post this comment when it comes online.',
+    warning: 'The detection server is busy, we will post this comment when it comes online.',
+    accountNotice: 'Content moderation services are temporarily overloaded. Your comment has been held and will be posted once verified.'
   };
 }
 
@@ -517,8 +563,19 @@ export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo
   try {
     systemActions.push('Stage 2: AI profanity detection initiated...');
     const stage2Result = await checkProfanityStage2(text, env);
-    if (stage2Result.skipped) {
-      systemActions.push('AI detection skipped gracefully, moving to Stage 3');
+    if (stage2Result.isServerBusy) {
+      systemActions.push('Stage 2 hold: Content detection server busy, queued for verification');
+      return {
+        hasProfanity: true,
+        isServerBusy: true,
+        stage: 2,
+        detectedWords: [],
+        systemActions,
+        title: 'Detection Server Busy',
+        message: 'The detection server is busy, we will post this comment when it comes online.',
+        warning: 'The detection server is busy, we will post this comment when it comes online.',
+        accountNotice: 'Content moderation services are temporarily overloaded. Your comment will be verified and posted once services resume.'
+      };
     } else if (stage2Result.hasProfanity) {
       systemActions.push('Stage 2 violation: AI safety model flagged inappropriate content');
       // Cache detected offensive words in database for future Stage 3 lookups
@@ -530,8 +587,19 @@ export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo
       systemActions.push('Stage 2 passed: AI safety model approved content');
     }
   } catch (err) {
-    systemActions.push(`Error in AI detection (${err.message?.slice(0, 40) || 'unknown'}), skipping stage 2`);
-    console.warn('[Profanity 3-Stage] Skipping Stage 2 gracefully due to unexpected error:', err.message);
+    systemActions.push('Stage 2 hold: Error reaching detection server');
+    console.warn('[Profanity 3-Stage] AI detection error:', err.message);
+    return {
+      hasProfanity: true,
+      isServerBusy: true,
+      stage: 2,
+      detectedWords: [],
+      systemActions,
+      title: 'Detection Server Busy',
+      message: 'The detection server is busy, we will post this comment when it comes online.',
+      warning: 'The detection server is busy, we will post this comment when it comes online.',
+      accountNotice: 'Content moderation services are temporarily overloaded. Your comment will be verified and posted once services resume.'
+    };
   }
 
   // --- STAGE 3: DATABASE-CACHED PROFANITY WORDS ---
