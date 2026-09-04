@@ -63,5 +63,13 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS profanity_words (
+  word TEXT PRIMARY KEY,
+  language TEXT DEFAULT 'unknown',
+  category TEXT DEFAULT 'general',
+  added_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(website_id, slug, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_profanity_words ON profanity_words(word);

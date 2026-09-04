@@ -8,7 +8,7 @@
 import http from 'http';
 import crypto from 'crypto';
 import { MongoClient } from 'mongodb';
-import { checkProfanity } from './functions/lib/profanity.js';
+import { detectProfanity3Stage, checkProfanity } from './functions/lib/profanity.js';
 
 // Load .env if present
 try {
@@ -539,14 +539,20 @@ const server = http.createServer(async (req, res) => {
           return sendError(res, 'Valid "slug" and comment "text" are required', 400, origin);
         }
 
-        // Profanity Check & Account Warning
-        const profanityResult = checkProfanity(text);
+        // 3-Stage Profanity & Safety Shield (In-Memory List -> AI Key Rotation -> Cached DB Words)
+        const profanityResult = await detectProfanity3Stage(text, {
+          db,
+          isMongo: true,
+          env: process.env,
+        });
+
         if (profanityResult.hasProfanity) {
           return sendJson(
             res,
             {
               success: false,
               isProfanity: true,
+              stage: profanityResult.stage,
               title: profanityResult.title || 'Content Policy & Account Warning',
               message: profanityResult.message || 'Inappropriate or offensive language was detected in your comment.',
               warning:

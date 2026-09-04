@@ -12,7 +12,7 @@ import { getContentDb } from '../lib/db.js';
 import { jsonResponse, errorResponse } from '../lib/cors.js';
 import { isValidSlug, validateCommentInput } from '../lib/validation.js';
 import { getAuthenticatedUser } from '../lib/auth.js';
-import { checkProfanity } from '../lib/profanity.js';
+import { detectProfanity3Stage, checkProfanity } from '../lib/profanity.js';
 import { DEVELOPER_EMAIL } from '../lib/email.js';
 
 async function sha256Hex(str) {
@@ -173,13 +173,14 @@ export async function onRequestPost(context) {
       return errorResponse('You have been blocked from commenting on this blog by the blog owner.', 403, request, env);
     }
 
-    // 3. Multi-Language Profanity Filter (English, Hindi, Hinglish, Tamil)
-    const profanityResult = checkProfanity(text);
+    // 3. 3-Stage Multi-Language & AI Profanity Shield
+    const profanityResult = await detectProfanity3Stage(text, { db, isMongo: false, env });
     if (profanityResult.hasProfanity) {
       return jsonResponse(
         {
           success: false,
           isProfanity: true,
+          stage: profanityResult.stage,
           title: profanityResult.title || 'Content Policy & Account Warning',
           message: profanityResult.message || 'Inappropriate or offensive language was detected in your comment.',
           warning:

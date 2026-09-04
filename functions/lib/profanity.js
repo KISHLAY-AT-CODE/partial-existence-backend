@@ -1,12 +1,15 @@
 /**
- * functions/lib/profanity.js — Comprehensive Multi-Language Profanity & Abuse Filter
+ * functions/lib/profanity.js — 3-Stage Multi-Language Profanity & Abuse Shield
  * 
- * Exhaustive dataset & regex normalization for:
- * 1. English
- * 2. Hindi (Devanagari)
- * 3. Hinglish (Romanized Hindi, Urdu, Punjabi & North Indian slang)
- * 4. Tamil (Tamil Script & Tanglish / Romanized Tamil)
+ * Architecture:
+ * 1. STAGE 1: In-Memory Multi-Language Pattern Matching (English, Hindi, Hinglish, Tamil, Tanglish)
+ * 2. STAGE 2: AI API Verification with Key Rotation (PROFANITY_1, PROFANITY_2) & Graceful Error Fallback
+ * 3. STAGE 3: Database-Cached Profanity Words Table/Collection Matching & Dynamic Learning
  */
+
+// ============================================================================
+// STAGE 1: IN-MEMORY MULTI-LANGUAGE DATASETS
+// ============================================================================
 
 // --- 1. ENGLISH PROFANITY DATASET ---
 const ENGLISH_BAD_WORDS = [
@@ -40,28 +43,20 @@ const HINDI_DEVANAGARI = [
 
 // --- 3. HINGLISH / ROMANIZED HINDI & NORTH INDIAN SLANG ---
 const HINGLISH_BAD_WORDS = [
-  // Bhenchod variations
   'bhenchod', 'behenchod', 'behen ke lode', 'bhen ke lode', 'bhen ke laude',
   'bhenchoda', 'bhenchodo', 'benchod', 'bhncod', 'bhnchod', 'bhenchodh', 'bc',
-  // Madarchod variations
   'madarchod', 'maderchod', 'madarchodh', 'madarchodu', 'mc', 'madrchod', 'madarchodd',
-  // Bhosdike variations
   'bsdk', 'bhosdike', 'bhosadike', 'bhosdi ke', 'bhosdi', 'bhosda', 'bhosada',
   'bhosdiwaala', 'bhosdiwale', 'bhosadpappu', 'bhosadchod', 'bhosad',
-  // Chutiya variations
   'chutiya', 'chutiye', 'chutya', 'chootiya', 'chutiyaapa', 'chutiyapa', 'chootiyapa',
   'choot', 'chut', 'chutaad', 'chutad', 'chootad', 'chut ke baal', 'chutmarani', 'chutmarike',
-  // Gandu / Gaand variations
   'gandu', 'gaandu', 'gand', 'gaand', 'gandfaad', 'gandmasti', 'gandmra', 'gand mara',
   'gaand mara', 'gandphati', 'gaandphati', 'ganduon', 'gandchoda',
-  // Lauda / Lodu variations
   'lauda', 'laude', 'lauda fek ke', 'lauda lasan', 'lavda', 'lavde', 'lodu', 'lodua',
   'loda', 'lode', 'lode ke baal', 'lavde ke baal', 'lund', 'laund',
-  // Randi / Bhadwa / Harami variations
   'randi', 'randy', 'randi rona', 'randwa', 'randwe', 'bhadwa', 'bhadwe', 'bhadve',
   'harami', 'haraami', 'haramzada', 'haramzade', 'kameena', 'kamina', 'kaminey',
   'kutta', 'kutti', 'kutte ki maut', 'suar', 'suar ki aulad', 'tatte', 'tatta', 'tatto',
-  // Slurs & Abuse
   'jhant', 'jhaant', 'jhantu', 'jhant ke baal', 'muth', 'muthiya', 'mutthal',
   'chakka', 'hijda', 'hijra', 'chapri', 'chirkut', 'teri maa ki', 'teri ma ki choot',
   'chud gaya', 'chudai', 'chod diya', 'chodna', 'chodu', 'chudwa'
@@ -77,37 +72,35 @@ const TAMIL_SCRIPT = [
 ];
 
 const TANGLISH_BAD_WORDS = [
-  // Otha / Gomma variations
   'otha', 'oththa', 'otha gomma', 'gomma', 'gothala', 'ommala', 'ommale', 'okkalaoli',
   'okkale', 'okkamala', 'otha poolu', 'othu thallu',
-  // Punda / Pundamavane variations
   'punda', 'punde', 'pundamavane', 'punda mavane', 'pundachi', 'pundamavan',
   'pundai', 'pundainga', 'punda munda', 'kenapunda', 'kenapunde',
-  // Koothi variations
   'koothi', 'koothi mavane', 'koothimavane', 'koothiya', 'koothichi',
-  // Sunni variations
   'sunni', 'sunniya', 'sunni poolu', 'chinna sunni', 'sunnikoodhi',
-  // Thevidiya variations
   'thevidiya', 'thevadiya', 'thevidiya paiya', 'thevidiya mavane', 'thevdiya', 'thevudiya',
-  // Thayoli variations
   'thayoli', 'thayoli mavane', 'thayoli paiya', 'thaayoli',
-  // Mayiru / Poolu / Abuses
   'mayiru', 'myre', 'mayir', 'mayire', 'mayirandi', 'poolu', 'poola', 'poola sappu', 'sappu',
   'kaamaveri', 'echakala', 'echakkalai', 'naaye', 'naye', 'nayee', 'pannada',
   'potta', 'kena', 'kenayan', 'savu', 'moodhevi', 'kasmaalam', 'kasmalam',
   'eruma', 'porambokku', 'baadu', 'baada', 'soothu', 'soothula', 'sootha moodu'
 ];
 
-// Combine all romanized arrays
 const ALL_ROMANIZED_PATTERNS = Array.from(new Set([
   ...ENGLISH_BAD_WORDS,
   ...HINGLISH_BAD_WORDS,
   ...TANGLISH_BAD_WORDS
 ]));
 
-/**
- * Normalizes user text for robust pattern matching
- */
+// Initial core seed words for caching in Database
+export const INITIAL_CACHE_WORDS = [
+  ...ENGLISH_BAD_WORDS.slice(0, 30),
+  ...HINGLISH_BAD_WORDS.slice(0, 30),
+  ...TANGLISH_BAD_WORDS.slice(0, 30),
+  ...HINDI_DEVANAGARI.slice(0, 20),
+  ...TAMIL_SCRIPT.slice(0, 20),
+];
+
 function cleanText(str) {
   if (!str || typeof str !== 'string') return '';
   return str
@@ -121,28 +114,22 @@ function cleanText(str) {
     .replace(/[8]/g, 'b');
 }
 
-/**
- * Collapse repeated characters (e.g. "fuuuck" -> "fuck", "bheeeenchod" -> "bhenchod")
- */
 function collapseRepeats(str) {
   return str.replace(/(.)\1{2,}/g, '$1$1');
 }
 
-/**
- * Strip spaces between individual letters to catch "f u c k", "b s d k"
- */
 function stripSpacing(str) {
   return str.replace(/[^a-z0-9\u0900-\u097F\u0B80-\u0BFF]/g, '');
 }
 
 /**
- * Enterprise-grade multi-language profanity detector
- * @param {string} text - User input string
- * @returns {{ hasProfanity: boolean, detectedWords: string[], message?: string }}
+ * STAGE 1: Fast in-memory regex & token profanity check
+ * @param {string} text
+ * @returns {{ hasProfanity: boolean, detectedWords: string[], stage: number }}
  */
-export function checkProfanity(text) {
+export function checkProfanityStage1(text) {
   if (!text || typeof text !== 'string') {
-    return { hasProfanity: false, detectedWords: [] };
+    return { hasProfanity: false, detectedWords: [], stage: 1 };
   }
 
   const raw = text.trim();
@@ -151,39 +138,35 @@ export function checkProfanity(text) {
   const spaceless = stripSpacing(normalized);
   const detected = [];
 
-  // 1. Check Hindi Devanagari Dictionary
+  // 1. Hindi Devanagari
   for (const bad of HINDI_DEVANAGARI) {
     if (raw.includes(bad) || normalized.includes(bad)) {
       detected.push(bad);
     }
   }
 
-  // 2. Check Tamil Script Dictionary
+  // 2. Tamil Script
   for (const bad of TAMIL_SCRIPT) {
     if (raw.includes(bad) || normalized.includes(bad)) {
       detected.push(bad);
     }
   }
 
-  // 3. Check Romanized Patterns (English, Hinglish, Tanglish)
+  // 3. Romanized Patterns
   for (const pattern of ALL_ROMANIZED_PATTERNS) {
     const cleanPat = pattern.toLowerCase();
 
-    // Direct substring for multi-word phrases
     if (cleanPat.includes(' ')) {
       if (normalized.includes(cleanPat) || collapsed.includes(cleanPat)) {
         detected.push(pattern);
       }
     } else {
-      // Word boundary regex
       const wordRegex = new RegExp(`(^|[^a-z0-9])${cleanPat}([^a-z0-9]|$)`, 'i');
       if (wordRegex.test(normalized) || wordRegex.test(collapsed)) {
         detected.push(pattern);
       }
 
-      // Spaceless match for short bypass acronyms (e.g., "b s d k", "b c", "m c", "f u c k")
       if (cleanPat.length >= 2 && spaceless.includes(cleanPat.replace(/\s+/g, ''))) {
-        // Only trigger spaceless for longer or explicit words to prevent false positives
         if (cleanPat.length >= 4 || ['bsdk', 'fuck', 'otha', 'punda', 'gandu', 'chut', 'lund'].includes(cleanPat)) {
           detected.push(pattern);
         }
@@ -191,21 +174,407 @@ export function checkProfanity(text) {
     }
   }
 
-  const uniqueDetected = Array.from(new Set(detected));
+  const unique = Array.from(new Set(detected));
+  return {
+    hasProfanity: unique.length > 0,
+    detectedWords: unique,
+    stage: 1
+  };
+}
 
-  if (uniqueDetected.length > 0) {
+// ============================================================================
+// STAGE 2: AI API VERIFICATION WITH ROTATION & GRACEFUL FALLBACK
+// ============================================================================
+
+let aiKeyRotationIndex = 0;
+
+/**
+ * Retrieves AI API keys from environment (Node process.env or Cloudflare env)
+ */
+function getAiApiKeys(env) {
+  const keys = [];
+  const key1 = (typeof process !== 'undefined' && process?.env?.PROFANITY_1) || env?.PROFANITY_1;
+  const key2 = (typeof process !== 'undefined' && process?.env?.PROFANITY_2) || env?.PROFANITY_2;
+
+  if (key1 && key1.trim()) keys.push(key1.trim());
+  if (key2 && key2.trim()) keys.push(key2.trim());
+
+  return keys;
+}
+
+/**
+ * Calls Gemini / AI Content Moderation endpoint with a specific key
+ */
+async function callAiModerationEndpoint(apiKey, text) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s timeout
+
+  try {
+    const prompt = `You are an automated content moderation classifier for a blog comments system.
+Evaluate if the following comment contains offensive language, severe profanity, hate speech, vulgar sexual terms, slurs, or harassment in any language (English, Hindi, Hinglish, Tamil, Tanglish, etc.).
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "isProfane": true or false,
+  "offensiveWords": ["word1", "word2"],
+  "reason": "short explanation"
+}
+
+Comment: """${text.replace(/"/g, '\\"')}"""`;
+
+    // Try gemini-2.0-flash or gemini-1.5-flash
+    let response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 200,
+            responseMimeType: 'application/json'
+          }
+        })
+      }
+    );
+
+    if (!response.ok && response.status === 404) {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 200
+            }
+          })
+        }
+      );
+    }
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`AI API HTTP ${response.status}: ${errText.slice(0, 100)}`);
+    }
+
+    const data = await response.json();
+    const candidateText =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      data?.candidates?.[0]?.output ||
+      '';
+
+    if (!candidateText) {
+      throw new Error('Empty AI response candidate');
+    }
+
+    // Parse JSON
+    const parsed = JSON.parse(candidateText.replace(/```json/g, '').replace(/```/g, '').trim());
     return {
-      hasProfanity: true,
-      detectedWords: uniqueDetected,
-      title: 'Content Policy & Account Warning',
-      message: 'Inappropriate or offensive language was detected in your comment.',
-      warning: 'Warning: Inappropriate or offensive language detected in your reflection. Continued violations will result in your account being permanently blocked.',
-      accountNotice: 'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.'
+      success: true,
+      isProfane: Boolean(parsed.isProfane),
+      offensiveWords: Array.isArray(parsed.offensiveWords) ? parsed.offensiveWords : [],
+      reason: parsed.reason || ''
     };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+/**
+ * STAGE 2: AI Verification with key rotation and graceful skip on error
+ * @param {string} text
+ * @param {object} env - Cloudflare env or process.env container
+ * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number, skipped?: boolean }>}
+ */
+export async function checkProfanityStage2(text, env = {}) {
+  const keys = getAiApiKeys(env);
+
+  if (keys.length === 0) {
+    console.debug('[Profanity Stage 2] No AI API keys configured (PROFANITY_1 / PROFANITY_2). Skipping gracefully to Stage 3.');
+    return { hasProfanity: false, detectedWords: [], stage: 2, skipped: true };
   }
 
+  // Rotate starting key index to balance load
+  const startIndex = aiKeyRotationIndex % keys.length;
+  aiKeyRotationIndex = (aiKeyRotationIndex + 1) % keys.length;
+
+  const candidateKeys = [
+    keys[startIndex],
+    ...keys.filter((_, idx) => idx !== startIndex)
+  ];
+
+  for (let i = 0; i < candidateKeys.length; i++) {
+    const key = candidateKeys[i];
+    try {
+      const result = await callAiModerationEndpoint(key, text);
+      if (result.success && result.isProfane) {
+        return {
+          hasProfanity: true,
+          detectedWords: result.offensiveWords.length > 0 ? result.offensiveWords : ['ai_detected_abuse'],
+          reason: result.reason,
+          stage: 2
+        };
+      }
+      // AI evaluated successfully and found text clean
+      return {
+        hasProfanity: false,
+        detectedWords: [],
+        stage: 2
+      };
+    } catch (err) {
+      console.warn(`[Profanity Stage 2] AI Key attempt ${i + 1}/${candidateKeys.length} failed:`, err.message);
+      // Try next key in rotation loop
+    }
+  }
+
+  // All AI keys experienced errors: skip Stage 2 gracefully and move to Stage 3
+  console.warn('[Profanity Stage 2] All AI keys failed or timed out. Skipping Stage 2 gracefully to Stage 3.');
+  return {
+    hasProfanity: false,
+    detectedWords: [],
+    stage: 2,
+    skipped: true
+  };
+}
+
+// ============================================================================
+// STAGE 3: DATABASE-CACHED PROFANITY WORDS TABLE / COLLECTION
+// ============================================================================
+
+/**
+ * Ensures the profanity_words table/collection exists and has initial words cached
+ */
+export async function ensureProfanityDbInitialized(db, isMongo = false) {
+  if (!db) return;
+
+  try {
+    if (isMongo) {
+      const col = db.collection('profanity_words');
+      await col.createIndex({ word: 1 }, { unique: true }).catch(() => {});
+      const count = await col.countDocuments();
+      if (count === 0) {
+        const docs = INITIAL_CACHE_WORDS.map((w) => ({
+          word: w.toLowerCase().trim(),
+          language: 'mixed',
+          category: 'initial_seed',
+          addedAt: new Date().toISOString()
+        }));
+        await col.insertMany(docs, { ordered: false }).catch(() => {});
+      }
+    } else {
+      // Cloudflare D1
+      await db.prepare(
+        `CREATE TABLE IF NOT EXISTS profanity_words (
+          word TEXT PRIMARY KEY,
+          language TEXT DEFAULT 'unknown',
+          category TEXT DEFAULT 'general',
+          added_at TEXT NOT NULL
+        )`
+      ).run().catch(() => {});
+    }
+  } catch (err) {
+    console.debug('[Profanity DB Init Warning]:', err.message);
+  }
+}
+
+/**
+ * Cache new offending words in the database for future Stage 3 lookups
+ */
+export async function cacheProfanityWords(words, db, isMongo = false) {
+  if (!db || !Array.isArray(words) || words.length === 0) return;
+
+  const validWords = words
+    .filter((w) => typeof w === 'string' && w.trim().length >= 2 && w.trim() !== 'ai_detected_abuse')
+    .map((w) => w.trim().toLowerCase());
+
+  if (validWords.length === 0) return;
+
+  try {
+    if (isMongo) {
+      const col = db.collection('profanity_words');
+      for (const w of validWords) {
+        await col.updateOne(
+          { word: w },
+          {
+            $setOnInsert: {
+              word: w,
+              language: 'auto_cached',
+              category: 'ai_flagged',
+              addedAt: new Date().toISOString()
+            }
+          },
+          { upsert: true }
+        ).catch(() => {});
+      }
+    } else {
+      // Cloudflare D1
+      for (const w of validWords) {
+        await db.prepare(
+          `INSERT OR IGNORE INTO profanity_words (word, language, category, added_at) VALUES (?, 'auto_cached', 'ai_flagged', ?)`
+        ).bind(w, new Date().toISOString()).run().catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.debug('[Profanity DB Cache Warning]:', err.message);
+  }
+}
+
+/**
+ * STAGE 3: Match against cached profanity words in the database
+ * @param {string} text
+ * @param {object} db - Database instance (D1 or MongoDB db)
+ * @param {boolean} isMongo - Whether db is MongoDB
+ * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number }>}
+ */
+export async function checkProfanityStage3(text, db, isMongo = false) {
+  if (!text || !db) {
+    return { hasProfanity: false, detectedWords: [], stage: 3 };
+  }
+
+  const raw = text.trim();
+  const normalized = cleanText(raw);
+  const detected = [];
+
+  try {
+    if (isMongo) {
+      const col = db.collection('profanity_words');
+      // Fetch cached words
+      const cachedList = await col.find({}, { projection: { word: 1 } }).limit(500).toArray();
+      for (const item of cachedList) {
+        if (!item.word) continue;
+        const w = item.word.toLowerCase();
+        if (w.includes(' ')) {
+          if (normalized.includes(w)) detected.push(item.word);
+        } else {
+          const regex = new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`, 'i');
+          if (regex.test(normalized) || raw.includes(item.word)) {
+            detected.push(item.word);
+          }
+        }
+      }
+    } else {
+      // Cloudflare D1
+      const results = await db.prepare('SELECT word FROM profanity_words LIMIT 500').all();
+      const rows = results?.results || [];
+      for (const item of rows) {
+        if (!item.word) continue;
+        const w = item.word.toLowerCase();
+        if (w.includes(' ')) {
+          if (normalized.includes(w)) detected.push(item.word);
+        } else {
+          const regex = new RegExp(`(^|[^a-z0-9])${w}([^a-z0-9]|$)`, 'i');
+          if (regex.test(normalized) || raw.includes(item.word)) {
+            detected.push(item.word);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.debug('[Profanity Stage 3 Warning]:', err.message);
+  }
+
+  const unique = Array.from(new Set(detected));
+  return {
+    hasProfanity: unique.length > 0,
+    detectedWords: unique,
+    stage: 3
+  };
+}
+
+// ============================================================================
+// UNIFIED 3-STAGE PROFANITY ORCHESTRATOR
+// ============================================================================
+
+/**
+ * Executes full 3-Stage Profanity & Content Safety Shield
+ * 
+ * 1. Stage 1: In-Memory List Matching
+ * 2. Stage 2: AI API Verification with Key Rotation (PROFANITY_1 / PROFANITY_2) & Graceful Fallback
+ * 3. Stage 3: Database-Cached Profanity Words Table Matching
+ * 
+ * @param {string} text - The comment reflection to check
+ * @param {object} options - { env, db, isMongo }
+ * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage?: number, title?: string, message?: string, warning?: string, accountNotice?: string }>}
+ */
+export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo = false } = {}) {
+  if (!text || typeof text !== 'string') {
+    return { hasProfanity: false, detectedWords: [] };
+  }
+
+  // Ensure DB table/collection exists if DB is provided
+  if (db) {
+    await ensureProfanityDbInitialized(db, isMongo).catch(() => {});
+  }
+
+  // --- STAGE 1: IN-MEMORY DICTIONARY MATCH ---
+  const stage1Result = checkProfanityStage1(text);
+  if (stage1Result.hasProfanity) {
+    return formatProfanityResponse(stage1Result.detectedWords, 1);
+  }
+
+  // --- STAGE 2: AI API VERIFICATION WITH ROTATION ---
+  try {
+    const stage2Result = await checkProfanityStage2(text, env);
+    if (stage2Result.hasProfanity) {
+      // Cache detected offensive words in database for future Stage 3 lookups
+      if (db) {
+        await cacheProfanityWords(stage2Result.detectedWords, db, isMongo).catch(() => {});
+      }
+      return formatProfanityResponse(stage2Result.detectedWords, 2);
+    }
+  } catch (err) {
+    console.warn('[Profanity 3-Stage] Skipping Stage 2 gracefully due to unexpected error:', err.message);
+  }
+
+  // --- STAGE 3: DATABASE-CACHED PROFANITY WORDS ---
+  if (db) {
+    try {
+      const stage3Result = await checkProfanityStage3(text, db, isMongo);
+      if (stage3Result.hasProfanity) {
+        return formatProfanityResponse(stage3Result.detectedWords, 3);
+      }
+    } catch (err) {
+      console.warn('[Profanity 3-Stage] Stage 3 error:', err.message);
+    }
+  }
+
+  // All 3 stages passed cleanly
   return {
     hasProfanity: false,
     detectedWords: []
   };
+}
+
+/**
+ * Standard profanity violation response payload
+ */
+function formatProfanityResponse(detectedWords, stage) {
+  return {
+    hasProfanity: true,
+    detectedWords,
+    stage,
+    title: 'Content Policy & Account Warning',
+    message: 'Inappropriate or offensive language was detected in your comment.',
+    warning: 'Warning: Inappropriate or offensive language detected in your reflection. Continued violations will result in your account being permanently blocked.',
+    accountNotice: 'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.'
+  };
+}
+
+/**
+ * Synchronous backward-compatible export (Maps to Stage 1)
+ */
+export function checkProfanity(text) {
+  const res = checkProfanityStage1(text);
+  if (res.hasProfanity) {
+    return formatProfanityResponse(res.detectedWords, 1);
+  }
+  return { hasProfanity: false, detectedWords: [] };
 }
