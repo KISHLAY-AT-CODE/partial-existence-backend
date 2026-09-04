@@ -505,6 +505,38 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // --- MODERATION SAAS CONFIG ---
+    if (pathname === '/api/moderation/config' || pathname === '/api/moderation') {
+      if (req.method === 'GET') {
+        return sendJson(
+          res,
+          {
+            enabled: true,
+            version: '3.0.0-saas',
+            dialogue: {
+              title: 'Looking for profanity words...',
+              subtitle: 'Verifying content against safety datasets, AI moderation & database filters',
+              scrambleSymbols: '$%^&*#@!',
+              symbols: ['$', '%', '^', '&', '*', '#', '@', '!'],
+              scrambleIntervalMs: 110,
+            },
+            stages: [
+              { id: 1, name: 'In-Memory Multi-Language Dataset', languages: ['English', 'Hindi', 'Hinglish', 'Tamil', 'Tanglish'] },
+              { id: 2, name: 'AI API Safety Verification', keyRotation: true, errorFallback: 'graceful_skip' },
+              { id: 3, name: 'Database Cached Profanity Table', dynamicLearning: true }
+            ],
+            policy: {
+              title: 'Content Policy & Account Warning',
+              defaultWarning: 'Warning: Inappropriate or offensive language detected in your reflection. Continued violations will result in your account being permanently blocked.',
+              accountNotice: 'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.'
+            }
+          },
+          200,
+          origin
+        );
+      }
+    }
+
     // --- COMMENTS ---
     if (pathname === '/api/comments') {
       if (req.method === 'GET') {

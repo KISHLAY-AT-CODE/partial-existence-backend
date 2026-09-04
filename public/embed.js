@@ -289,6 +289,135 @@
         color: #b8e040;
         text-decoration: underline;
       }
+      /* SaaS Profanity Moderation Dialogue Box */
+      #pe-saas-profanity-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(10, 15, 20, 0.78);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        z-index: 9999999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        animation: peFadeIn 0.25s ease-out forwards;
+      }
+      @keyframes peFadeIn {
+        from { opacity: 0; transform: scale(0.96); }
+        to { opacity: 1; transform: scale(1); }
+      }
+      .pe-saas-profanity-card {
+        background: linear-gradient(145deg, rgba(20, 28, 36, 0.96), rgba(12, 18, 24, 0.98));
+        border: 1px solid rgba(147, 197, 253, 0.35);
+        border-radius: 1rem;
+        padding: 2rem 2.25rem;
+        max-width: 440px;
+        width: 100%;
+        text-align: center;
+        box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.8), 0 0 35px -5px rgba(59, 130, 246, 0.3);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #f0f6fc;
+      }
+      .pe-saas-shield-wrap {
+        position: relative;
+        width: 64px;
+        height: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 1.25rem;
+      }
+      .pe-saas-shield-radar {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 2px solid rgba(59, 130, 246, 0.55);
+        animation: peRadar 2s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+      }
+      @keyframes peRadar {
+        0% { transform: scale(0.6); opacity: 0.9; }
+        70% { transform: scale(1.4); opacity: 0.15; box-shadow: 0 0 25px rgba(96, 165, 250, 0.6); }
+        100% { transform: scale(1.6); opacity: 0; }
+      }
+      .pe-saas-shield-icon {
+        font-size: 2rem;
+        z-index: 2;
+        filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.7));
+      }
+      .pe-saas-profanity-title {
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: #f0f6fc;
+        margin: 0 0 0.5rem 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .pe-saas-scramble-badge {
+        font-family: monospace;
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        background: linear-gradient(90deg, #f43f5e, #fbbf24, #34d399, #38bdf8, #a78bfa, #ec4899);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: inline-block;
+        padding: 2px 10px;
+        background-color: rgba(15, 23, 42, 0.7);
+        border-radius: 6px;
+        border: 1px solid rgba(244, 63, 94, 0.3);
+      }
+      .pe-saas-profanity-desc {
+        font-size: 0.82rem;
+        line-height: 1.45;
+        color: #94a3b8;
+        margin: 0 0 1.5rem 0;
+        max-width: 320px;
+      }
+      .pe-saas-symbols-track {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+        padding: 0.65rem 1.15rem;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(59, 130, 246, 0.25);
+        border-radius: 9999px;
+      }
+      .pe-saas-symbol {
+        font-family: monospace;
+        font-size: 1.25rem;
+        font-weight: 700;
+        display: inline-block;
+      }
+      .pe-saas-progress-track {
+        width: 100%;
+        height: 4px;
+        background: rgba(30, 41, 59, 0.8);
+        border-radius: 9999px;
+        overflow: hidden;
+        position: relative;
+      }
+      .pe-saas-progress-bar {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 40%;
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+        border-radius: 9999px;
+        animation: peIndeterminate 1.6s ease-in-out infinite;
+      }
+      @keyframes peIndeterminate {
+        0% { left: -40%; width: 30%; }
+        50% { left: 30%; width: 50%; }
+        100% { left: 100%; width: 30%; }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -589,11 +718,97 @@
     init();
   }
 
+  // --- SaaS Profanity Moderation Dialogue Box Controller ---
+  let moderationInterval = null;
+
+  function showModerationDialog(options = {}) {
+    hideModerationDialog();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pe-saas-profanity-overlay';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.setAttribute('aria-label', 'Looking for profanity words');
+
+    const title = options.title || 'Looking for profanity words...';
+    const subtitle = options.subtitle || 'Verifying content against safety datasets, AI moderation & database filters';
+    const chars = ['$', '%', '^', '&', '*', '#', '@', '!'];
+
+    overlay.innerHTML = `
+      <div class="pe-saas-profanity-card" onclick="event.stopPropagation()">
+        <div class="pe-saas-shield-wrap">
+          <div class="pe-saas-shield-radar"></div>
+          <div class="pe-saas-shield-icon">🛡️</div>
+        </div>
+        <h4 class="pe-saas-profanity-title">
+          <span>${title}</span>
+          <span class="pe-saas-scramble-badge" id="pe-saas-scramble-text">$%^&*#@!</span>
+        </h4>
+        <p class="pe-saas-profanity-desc">${subtitle}</p>
+        <div class="pe-saas-symbols-track" aria-hidden="true">
+          ${chars.map((c, i) => `<span class="pe-saas-symbol" style="color: ${['#34d399', '#fbbf24', '#38bdf8', '#a78bfa', '#f472b6', '#f43f5e', '#60a5fa', '#fb923c'][i]}">${c}</span>`).join('')}
+        </div>
+        <div class="pe-saas-progress-track">
+          <div class="pe-saas-progress-bar"></div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const badge = overlay.querySelector('#pe-saas-scramble-text');
+    moderationInterval = setInterval(() => {
+      if (badge) {
+        badge.innerText = [...chars].sort(() => 0.5 - Math.random()).join('');
+      }
+    }, 110);
+  }
+
+  function hideModerationDialog() {
+    if (moderationInterval) {
+      clearInterval(moderationInterval);
+      moderationInterval = null;
+    }
+    const overlay = document.getElementById('pe-saas-profanity-overlay');
+    if (overlay) overlay.remove();
+  }
+
+  async function postCommentWithModeration(slug, text, extra = {}) {
+    showModerationDialog();
+    try {
+      const res = await fetch(`${hostUrl}/api/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Website-Id': websiteId,
+          ...(currentAuthToken ? { 'Authorization': `Bearer ${currentAuthToken}` } : {})
+        },
+        body: JSON.stringify({
+          slug,
+          text,
+          author: currentUser?.name || 'Anonymous',
+          email: currentUser?.email || null,
+          websiteId,
+          ...extra
+        })
+      });
+      const data = await res.json();
+      return { ok: res.ok, status: res.status, data };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    } finally {
+      hideModerationDialog();
+    }
+  }
+
   window.PartialExistenceSaaS = {
     websiteId,
     apiUrl: hostUrl,
-    version: '2.0.0',
+    version: '3.0.0-saas',
     openAuth: openAuthModal,
+    showModerationScan: showModerationDialog,
+    hideModerationScan: hideModerationDialog,
+    postCommentWithModeration,
     reinject: init
   };
 })();
