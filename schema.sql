@@ -70,6 +70,28 @@ CREATE TABLE IF NOT EXISTS profanity_words (
   added_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS blocked_users (
+  website_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  email TEXT,
+  blocked_by TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (website_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS blocked_ips (
+  ip TEXT NOT NULL,
+  website_id TEXT NOT NULL,
+  user_id TEXT,
+  blocked_by TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (ip, website_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(website_id, slug, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_profanity_words ON profanity_words(word);
+CREATE INDEX IF NOT EXISTS idx_blocked_ips_lookup ON blocked_ips(website_id, ip);
+CREATE INDEX IF NOT EXISTS idx_blocked_users_lookup ON blocked_users(website_id, user_id);

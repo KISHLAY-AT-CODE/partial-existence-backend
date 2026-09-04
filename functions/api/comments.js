@@ -163,17 +163,38 @@ export async function onRequestPost(context) {
   try {
     const db = await getContentDb(env);
 
-    // 2. Check if user is blocked by blog owner
-    const isBlocked = await db
+    const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
+
+    // 2. Check if user or IP is blocked by blog owner
+    const isUserBlocked = await db
       .prepare('SELECT 1 FROM blocked_users WHERE website_id = ? AND user_id = ?')
       .bind(websiteId, authUser.userId)
       .first();
 
-    if (isBlocked) {
+    if (isUserBlocked) {
+      return errorResponse('Your account has been blocked from commenting on this blog by the blog owner.', 403, request, env);
+    }
+
+    const isIpBlocked = await db
+      .prepare('SELECT 1 FROM blocked_ips WHERE website_id = ? AND ip = ?')
+      .bind(websiteId, clientIp)
+      .first();
+
+    if (isIpBlocked) {
       return errorResponse('You have been blocked from commenting on this blog by the blog owner.', 403, request, env);
     }
 
-    // 3. 3-Stage Multi-Language & AI Profanity Shield
+    // 3. Rate Limit: Maximum 3 comments per user on this specific blog website
+    const userComments = await db
+      .prepare('SELECT COUNT(*) as count FROM comments WHERE website_id = ? AND (user_id = ? OR author_token = ?)')
+      .bind(websiteId, authUser.userId, authUser.userId)
+      .first();
+
+    if (userComments && userComments.count >= 3) {
+      return errorResponse('You have reached the maximum limit of 3 comments for this blog website.', 429, request, env);
+    }
+
+    // 4. 3-Stage Multi-Language & AI Profanity Shield
     const profanityResult = await detectProfanity3Stage(text, { db, isMongo: false, env });
     if (profanityResult.hasProfanity) {
       return jsonResponse(
@@ -186,7 +207,7 @@ export async function onRequestPost(context) {
           message: profanityResult.message || 'Inappropriate or offensive language was detected in your comment.',
           warning:
             profanityResult.warning ||
-            'Warning: Inappropriate or offensive language detected. Please adhere to community guidelines. Your account will be permanently blocked if this behavior continues.',
+            'Warning: Inappropriate or offensive language detected. Continued violations will result in your account being blocked.',
           accountNotice:
             profanityResult.accountNotice ||
             'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.',
@@ -205,6 +226,7 @@ export async function onRequestPost(context) {
     const commentId = `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const now = new Date().toISOString();
     const emailHash = await sha256Hex(authUser.email);
+    const commentStatus = profanityResult.status || 'approved';
 
     await db
       .prepare(
@@ -222,7 +244,7 @@ export async function onRequestPost(context) {
         subscribeUpdates ? 1 : 0,
         text,
         authUser.userId,
-        'approved',
+        commentStatus,
         null,
         now
       )
@@ -242,6 +264,7 @@ export async function onRequestPost(context) {
           emailHash,
           subscribeUpdates: Boolean(subscribeUpdates),
           text,
+          status: commentStatus,
           date: now,
         },
       },

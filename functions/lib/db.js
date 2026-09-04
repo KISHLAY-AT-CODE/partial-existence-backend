@@ -71,6 +71,15 @@ const CONTENT_STATEMENTS = [
     created_at TEXT NOT NULL,
     PRIMARY KEY (website_id, user_id)
   );`,
+  `CREATE TABLE IF NOT EXISTS blocked_ips (
+    ip TEXT NOT NULL,
+    website_id TEXT NOT NULL,
+    user_id TEXT,
+    blocked_by TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (ip, website_id)
+  );`,
   `CREATE TABLE IF NOT EXISTS profanity_words (
     word TEXT PRIMARY KEY,
     language TEXT DEFAULT 'unknown',
@@ -78,7 +87,8 @@ const CONTENT_STATEMENTS = [
     added_at TEXT NOT NULL
   );`,
   `CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(website_id, slug, created_at DESC);`,
-  `CREATE INDEX IF NOT EXISTS idx_profanity_words ON profanity_words(word);`
+  `CREATE INDEX IF NOT EXISTS idx_profanity_words ON profanity_words(word);`,
+  `CREATE INDEX IF NOT EXISTS idx_blocked_ips ON blocked_ips(website_id, ip);`
 ];
 
 const AUTH_STATEMENTS = [

@@ -191,12 +191,143 @@ let aiKeyRotationIndex = 0;
 
 
 /**
+ * Calls Groq API for content moderation (Ultra-fast inference with safety flags)
+ */
+async function callGroqModerationEndpoint(apiKey, text) {
+  const prompt = `You are an advanced content safety and moderation AI. Analyze if the following text contains any inappropriate content.
+
+CRITICAL DETECTION RULES:
+- Spacing Evasion & Letter Separation: Strictly look out for spaces, tabs, periods, or separators inserted between individual letters or characters in abusive words, slurs, or profanities (e.g. "b h e n c h o d", "f u c k", "b s d k", "m a d a r c h o d", "c u n t", "s h i t", "a s s h o l e", "g a n d u", "p u n d a", "l u n d"). Always inspect spaced-out sequences as single combined words.
+- Character Repetition & Stretched Words: Strictly look out for repeated characters and letters used to stretch, emphasize, or disguise abusive words, slurs, or profanities (e.g. "betichooooood", "bheeeeenchood", "fuuuuck", "looooser", "idiiooot", "shiiiiit", "aasssshole", "cuuunt").
+- Obfuscation & Evasion: Look out for symbols, punctuation, asterisks, dots, or numbers inserted inside bad words (e.g. "BHEEENCH%OOOIID", "F***uck", "f*ck", "b$dk", "a$$hole", "f.u.c.k", "b_h_e_n_c_h_o_d").
+- Multi-Language Abuse: Detect abusive words, insults, and harassment across English, Hindi, Hinglish, Tamil, Tanglish, and regional slang.
+
+CATEGORIES TO ANALYZE:
+1. Hateful speech (racism, casteism, religious hatred, xenophobia, misogyny, ethnic slurs, identity attacks, discrimination)
+2. Abusive language (personal attacks, harassment, hostility, insults, bullying, threats)
+3. Profanity & vulgarity (curse words, swearing, vulgar slang)
+4. Sexual content / violence / self-harm
+
+If ANY inappropriate content is found, respond ONLY with a valid JSON object in this format:
+{"verdict": "DISAPPROVED", "flags": ["hate_speech", "abusive_language", "profanity", "sexual_content", "violence_harm"], "reason": "<short 1-line reason>"}
+
+(Only include the specific flags that apply from: hate_speech, abusive_language, profanity, sexual_content, violence_harm)
+
+If completely clean, civil, and safe, respond ONLY with a valid JSON object:
+{"verdict": "APPROVED", "flags": [], "reason": "Clean and safe"}
+
+Text: """${text.replace(/"/g, '\\"')}"""`;
+
+  const payload = {
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.0,
+    max_tokens: 150,
+    response_format: { type: 'json_object' }
+  };
+
+  const candidateModels = [
+    'qwen/qwen3.6-27b',
+    'openai/gpt-oss-20b',
+    'openai/gpt-oss-120b',
+    'allam-2-7b',
+    'groq/compound-mini'
+  ];
+
+  let lastErr = null;
+
+  for (const model of candidateModels) {
+    payload.model = model;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'User-Agent': 'PartialExistenceModerationBot/1.0 (Mozilla/5.0)'
+        },
+        signal: controller.signal,
+        body: JSON.stringify(payload)
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => '');
+        lastErr = `HTTP ${response.status} (${model}): ${errBody.slice(0, 100)}`;
+        continue;
+      }
+
+      const data = await response.json();
+      const choice = data.choices?.[0] || {};
+      const message = choice.message || {};
+      const content = (message.content || '').trim();
+      const reasoning = (message.reasoning || '').trim();
+
+      let parsed = {};
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        // Fallback pattern extraction if not clean JSON
+        const fullText = `${content} ${reasoning}`.toUpperCase();
+        parsed = {
+          verdict: fullText.includes('DISAPPROVED') ? 'DISAPPROVED' : 'APPROVED',
+          flags: [],
+          reason: ''
+        };
+        if (fullText.includes('HATE')) parsed.flags.push('hate_speech');
+        if (fullText.includes('ABUSIVE') || fullText.includes('HARASS')) parsed.flags.push('abusive_language');
+        if (fullText.includes('PROFAN') || fullText.includes('VULGAR')) parsed.flags.push('profanity');
+      }
+
+      const isDisapproved = (parsed.verdict || '').toUpperCase() === 'DISAPPROVED' || `${content} ${reasoning}`.toUpperCase().includes('DISAPPROVED');
+      const flags = Array.isArray(parsed.flags) && parsed.flags.length > 0 ? parsed.flags : (isDisapproved ? ['inappropriate_content'] : []);
+      const reason = parsed.reason || (isDisapproved ? 'Content flagged by AI moderation safety policy' : 'Clean');
+
+      return {
+        success: true,
+        isProfane: isDisapproved,
+        verdict: isDisapproved ? 'DISAPPROVED' : 'APPROVED',
+        flags,
+        reason,
+        model: `Groq (${model})`
+      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastErr = err.name === 'AbortError' ? `Timeout (${model})` : err.message;
+      continue;
+    }
+  }
+
+  throw new Error(lastErr || 'All Groq moderation models failed');
+}
+
+/**
  * Calls Gemini / AI Content Moderation endpoint with a specific key (Ultra-low token footprint)
  */
-async function callAiModerationEndpoint(apiKey, text) {
-  const prompt = `You are a content safety moderation AI. Analyze if the following text contains any vulgarity, curse words, sexual insults, abusive slurs, profanity, or harassment in any language (English, Hindi, Hinglish, Tamil, etc.).
-If ANY profanity or offensive language is found, respond ONLY with: {"verdict": "DISAPPROVED"}
-If completely clean and safe, respond ONLY with: {"verdict": "APPROVED"}
+async function callGeminiModerationEndpoint(apiKey, text) {
+  const prompt = `You are an advanced content safety and moderation AI. Analyze if the following text contains any inappropriate content.
+
+CRITICAL DETECTION RULES:
+- Spacing Evasion & Letter Separation: Strictly look out for spaces, tabs, periods, or separators inserted between individual letters or characters in abusive words, slurs, or profanities (e.g. "b h e n c h o d", "f u c k", "b s d k", "m a d a r c h o d", "c u n t", "s h i t", "a s s h o l e", "g a n d u", "p u n d a", "l u n d"). Always inspect spaced-out sequences as single combined words.
+- Character Repetition & Stretched Words: Strictly look out for repeated characters and letters used to stretch, emphasize, or disguise abusive words, slurs, or profanities (e.g. "betichooooood", "bheeeeenchood", "fuuuuck", "looooser", "idiiooot", "shiiiiit", "aasssshole", "cuuunt").
+- Obfuscation & Evasion: Look out for symbols, punctuation, asterisks, dots, or numbers inserted inside bad words (e.g. "BHEEENCH%OOOIID", "F***uck", "f*ck", "b$dk", "a$$hole", "f.u.c.k", "b_h_e_n_c_h_o_d").
+- Multi-Language Abuse: Detect abusive words, insults, and harassment across English, Hindi, Hinglish, Tamil, Tanglish, and regional slang.
+
+CATEGORIES TO ANALYZE:
+1. Hateful speech (racism, casteism, religious hatred, xenophobia, misogyny, ethnic slurs, identity attacks, discrimination)
+2. Abusive language (personal attacks, harassment, hostility, insults, bullying, threats)
+3. Profanity & vulgarity (curse words, swearing, vulgar slang)
+4. Sexual content / violence / self-harm
+
+If ANY inappropriate content is found, respond ONLY with a valid JSON object in this format:
+{"verdict": "DISAPPROVED", "flags": ["hate_speech", "abusive_language", "profanity", "sexual_content", "violence_harm"], "reason": "<short 1-line reason>"}
+
+(Only include the specific flags that apply from: hate_speech, abusive_language, profanity, sexual_content, violence_harm)
+
+If completely clean, civil, and safe, respond ONLY with a valid JSON object:
+{"verdict": "APPROVED", "flags": [], "reason": "Clean and safe"}
 
 Text: """${text.replace(/"/g, '\\"')}"""`;
 
@@ -204,7 +335,7 @@ Text: """${text.replace(/"/g, '\\"')}"""`;
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.0,
-      maxOutputTokens: 16,
+      maxOutputTokens: 100,
       responseMimeType: 'application/json'
     }
   };
@@ -252,6 +383,7 @@ Text: """${text.replace(/"/g, '\\"')}"""`;
             success: true,
             isProfane: true,
             verdict: 'DISAPPROVED',
+            flags: ['hate_speech', 'abusive_language'],
             reason: `Safety filter blocked: ${promptFeedback.blockReason}`
           };
         }
@@ -264,6 +396,7 @@ Text: """${text.replace(/"/g, '\\"')}"""`;
             success: true,
             isProfane: true,
             verdict: 'DISAPPROVED',
+            flags: ['abusive_language', 'hate_speech'],
             reason: `Blocked by finishReason: ${finishReason}`
           };
         }
@@ -273,13 +406,32 @@ Text: """${text.replace(/"/g, '\\"')}"""`;
           candidate?.output ||
           '';
 
-        const isDisapproved = candidateText.toUpperCase().includes('DISAPPROVED');
+        let parsed = {};
+        try {
+          parsed = JSON.parse(candidateText);
+        } catch {
+          const fullUpper = candidateText.toUpperCase();
+          parsed = {
+            verdict: fullUpper.includes('DISAPPROVED') ? 'DISAPPROVED' : 'APPROVED',
+            flags: [],
+            reason: ''
+          };
+          if (fullUpper.includes('HATE')) parsed.flags.push('hate_speech');
+          if (fullUpper.includes('ABUSIVE')) parsed.flags.push('abusive_language');
+          if (fullUpper.includes('PROFAN')) parsed.flags.push('profanity');
+        }
+
+        const isDisapproved = (parsed.verdict || '').toUpperCase() === 'DISAPPROVED' || candidateText.toUpperCase().includes('DISAPPROVED');
+        const flags = Array.isArray(parsed.flags) && parsed.flags.length > 0 ? parsed.flags : (isDisapproved ? ['inappropriate_content'] : []);
+        const reason = parsed.reason || (isDisapproved ? 'Content flagged by safety policy' : 'Clean');
 
         return {
           success: true,
           isProfane: isDisapproved,
           verdict: isDisapproved ? 'DISAPPROVED' : 'APPROVED',
-          model: `${model} (${v})`
+          flags,
+          reason,
+          model: `Gemini (${model} ${v})`
         };
       } catch (err) {
         clearTimeout(timeoutId);
@@ -289,7 +441,17 @@ Text: """${text.replace(/"/g, '\\"')}"""`;
     }
   }
 
-  throw new Error(lastErr || 'All AI models/versions failed');
+  throw new Error(lastErr || 'All Gemini AI models/versions failed');
+}
+
+/**
+ * Universal AI Moderation Router (Groq vs Gemini)
+ */
+async function callAiModerationEndpoint(apiKey, text) {
+  if (apiKey.startsWith('gsk_')) {
+    return callGroqModerationEndpoint(apiKey, text);
+  }
+  return callGeminiModerationEndpoint(apiKey, text);
 }
 
 /**
@@ -305,7 +467,8 @@ function getAiApiKeys(env) {
     if (k && k.trim()) keys.push(k.trim());
   }
 
-  // Also check generic GEMINI_API_KEY or PROFANITY_API_KEY
+  // Also check generic GROQ_API_KEY, GEMINI_API_KEY, or PROFANITY_API_KEY
+  if (source.GROQ_API_KEY && source.GROQ_API_KEY.trim()) keys.push(source.GROQ_API_KEY.trim());
   if (source.GEMINI_API_KEY && source.GEMINI_API_KEY.trim()) keys.push(source.GEMINI_API_KEY.trim());
   if (source.PROFANITY_API_KEY && source.PROFANITY_API_KEY.trim()) keys.push(source.PROFANITY_API_KEY.trim());
 
@@ -314,25 +477,23 @@ function getAiApiKeys(env) {
 
 /**
  * STAGE 2: AI Verification with key rotation across all available keys
- * If all keys error out, flags server as busy rather than allowing unverified comments through.
+ * If all keys error out, marks comment as pending rather than rejecting it outright.
  * @param {string} text
  * @param {object} env - Cloudflare env or process.env container
- * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number, isServerBusy?: boolean, message?: string, warning?: string, title?: string, accountNotice?: string }>}
+ * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number, isServerBusy?: boolean, status?: string, verdict?: string }>}
  */
 export async function checkProfanityStage2(text, env = {}) {
   const keys = getAiApiKeys(env);
 
   if (keys.length === 0) {
-    console.warn('[Profanity Stage 2] No AI keys configured. Flagging detection server busy.');
+    console.warn('[Profanity Stage 2] No AI keys configured. Queuing comment for background review.');
     return {
-      hasProfanity: true,
+      hasProfanity: false,
       isServerBusy: true,
       stage: 2,
+      status: 'pending',
       detectedWords: [],
-      title: 'Detection Server Busy',
-      message: 'The detection server is busy, we will post this comment when it comes online.',
-      warning: 'The detection server is busy, we will post this comment when it comes online.',
-      accountNotice: 'Content moderation services are currently unavailable. Your comment will be verified once services resume.'
+      verdict: 'PENDING_AI_VERIFICATION'
     };
   }
 
@@ -348,6 +509,9 @@ export async function checkProfanityStage2(text, env = {}) {
           hasProfanity: true,
           detectedWords: ['ai_flagged_content'],
           verdict: 'DISAPPROVED',
+          flags: result.flags || ['inappropriate_content'],
+          reason: result.reason || 'Flagged by AI safety policy',
+          status: 'rejected',
           stage: 2
         };
       }
@@ -355,7 +519,10 @@ export async function checkProfanityStage2(text, env = {}) {
       return {
         hasProfanity: false,
         detectedWords: [],
+        flags: [],
+        reason: 'Clean',
         verdict: 'APPROVED',
+        status: 'approved',
         stage: 2
       };
     } catch (err) {
@@ -364,17 +531,17 @@ export async function checkProfanityStage2(text, env = {}) {
     }
   }
 
-  // If all keys failed with errors, do not silently approve unverified content
-  console.warn(`[Profanity Stage 2] All AI keys failed. Reason: ${lastErrorMsg}`);
+  // If all keys failed with errors/offline, return pending so comment is stored but hidden until online
+  console.warn(`[Profanity Stage 2] All AI keys failed or offline. Reason: ${lastErrorMsg}`);
   return {
-    hasProfanity: true,
+    hasProfanity: false,
     isServerBusy: true,
     stage: 2,
+    status: 'pending',
     detectedWords: [],
-    title: 'Detection Server Busy',
-    message: 'The detection server is busy, we will post this comment when it comes online.',
-    warning: 'The detection server is busy, we will post this comment when it comes online.',
-    accountNotice: 'Content moderation services are temporarily overloaded. Your comment has been held and will be posted once verified.'
+    flags: [],
+    reason: 'Pending AI verification',
+    verdict: 'PENDING_AI_VERIFICATION'
   };
 }
 
@@ -530,19 +697,19 @@ export async function checkProfanityStage3(text, db, isMongo = false) {
  * Executes full 3-Stage Profanity & Content Safety Shield
  * 
  * 1. Stage 1: In-Memory List Matching
- * 2. Stage 2: AI API Verification with Key Rotation (PROFANITY_1 / PROFANITY_2) & Graceful Fallback
+ * 2. Stage 2: AI API Verification with Key Rotation (PROFANITY_1 / PROFANITY_2 / PROFANITY_3)
  * 3. Stage 3: Database-Cached Profanity Words Table Matching
  * 
  * @param {string} text - The comment reflection to check
  * @param {object} options - { env, db, isMongo }
- * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage?: number, title?: string, message?: string, warning?: string, accountNotice?: string }>}
+ * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], flags?: string[], reason?: string, stage?: number, title?: string, message?: string, warning?: string, accountNotice?: string }>}
  */
 export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo = false } = {}) {
   const systemActions = [];
   systemActions.push('Multi-layer profanity filtering system initialized');
 
   if (!text || typeof text !== 'string') {
-    return { hasProfanity: false, detectedWords: [], systemActions };
+    return { hasProfanity: false, detectedWords: [], systemActions, flags: [] };
   }
 
   // Ensure DB table/collection exists if DB is provided
@@ -555,51 +722,39 @@ export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo
   const stage1Result = checkProfanityStage1(text);
   if (stage1Result.hasProfanity) {
     systemActions.push('Stage 1 violation: Inappropriate keywords detected in dictionary');
-    return formatProfanityResponse(stage1Result.detectedWords, 1, systemActions);
+    return formatProfanityResponse(stage1Result.detectedWords, 1, systemActions, ['profanity'], 'Dictionary matched offensive terms');
   }
   systemActions.push('Stage 1 passed: No baseline dictionary profanity found');
 
   // --- STAGE 2: AI API VERIFICATION WITH ROTATION ---
+  let aiStatus = 'approved';
   try {
-    systemActions.push('Stage 2: AI profanity detection initiated...');
+    systemActions.push('Stage 2: AI content safety and abuse analysis initiated...');
     const stage2Result = await checkProfanityStage2(text, env);
-    if (stage2Result.isServerBusy) {
-      systemActions.push('Stage 2 hold: Content detection server busy, queued for verification');
-      return {
-        hasProfanity: true,
-        isServerBusy: true,
-        stage: 2,
-        detectedWords: [],
-        systemActions,
-        title: 'Detection Server Busy',
-        message: 'The detection server is busy, we will post this comment when it comes online.',
-        warning: 'The detection server is busy, we will post this comment when it comes online.',
-        accountNotice: 'Content moderation services are temporarily overloaded. Your comment will be verified and posted once services resume.'
-      };
-    } else if (stage2Result.hasProfanity) {
-      systemActions.push('Stage 2 violation: AI safety model flagged inappropriate content');
+    if (stage2Result.hasProfanity) {
+      systemActions.push(`Stage 2 violation: AI flagged content (${stage2Result.flags?.join(', ') || 'violation'})`);
       // Cache detected offensive words in database for future Stage 3 lookups
       if (db) {
         await cacheProfanityWords(stage2Result.detectedWords, db, isMongo).catch(() => {});
       }
-      return formatProfanityResponse(stage2Result.detectedWords, 2, systemActions);
+      return formatProfanityResponse(
+        stage2Result.detectedWords,
+        2,
+        systemActions,
+        stage2Result.flags || [],
+        stage2Result.reason || ''
+      );
+    } else if (stage2Result.isServerBusy || stage2Result.status === 'pending') {
+      systemActions.push('Stage 2 notice: AI moderation offline/busy; comment queued as pending verification');
+      aiStatus = 'pending';
     } else {
       systemActions.push('Stage 2 passed: AI safety model approved content');
+      aiStatus = 'approved';
     }
   } catch (err) {
-    systemActions.push('Stage 2 hold: Error reaching detection server');
+    systemActions.push('Stage 2 notice: AI verification service skipped; queued as pending');
     console.warn('[Profanity 3-Stage] AI detection error:', err.message);
-    return {
-      hasProfanity: true,
-      isServerBusy: true,
-      stage: 2,
-      detectedWords: [],
-      systemActions,
-      title: 'Detection Server Busy',
-      message: 'The detection server is busy, we will post this comment when it comes online.',
-      warning: 'The detection server is busy, we will post this comment when it comes online.',
-      accountNotice: 'Content moderation services are temporarily overloaded. Your comment will be verified and posted once services resume.'
-    };
+    aiStatus = 'pending';
   }
 
   // --- STAGE 3: DATABASE-CACHED PROFANITY WORDS ---
@@ -609,7 +764,7 @@ export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo
       const stage3Result = await checkProfanityStage3(text, db, isMongo);
       if (stage3Result.hasProfanity) {
         systemActions.push('Stage 3 violation: Content matched dynamically learned profanity cache');
-        return formatProfanityResponse(stage3Result.detectedWords, 3, systemActions);
+        return formatProfanityResponse(stage3Result.detectedWords, 3, systemActions, ['profanity'], 'Cached term matched');
       }
       systemActions.push('Stage 3 passed: Database cache clean');
     } catch (err) {
@@ -618,29 +773,58 @@ export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo
     }
   }
 
-  systemActions.push('All safety stages passed: Comment approved for publication');
+  systemActions.push(aiStatus === 'approved' ? 'All safety stages passed: Comment approved for public viewing' : 'Comment saved and queued for AI verification');
 
-  // All 3 stages passed cleanly
+  // All passed
   return {
     hasProfanity: false,
+    status: aiStatus,
     detectedWords: [],
+    flags: [],
     systemActions
   };
 }
 
 /**
- * Standard profanity violation response payload
+ * Standard profanity & abuse violation response payload with tailored flags
  */
-function formatProfanityResponse(detectedWords, stage, systemActions = []) {
+function formatProfanityResponse(detectedWords, stage, systemActions = [], flags = [], reason = '') {
+  let title = 'Content Policy & Safety Warning';
+  let message = 'Inappropriate, abusive, or offensive content was detected in your comment.';
+  let warning = 'Warning: Inappropriate or abusive language detected in your reflection. Continued violations will result in your account being permanently blocked.';
+
+  if (flags.includes('hate_speech')) {
+    title = 'Content Policy Violation: Hate Speech Detected';
+    message = reason || 'Hate speech, derogatory slurs, or discriminatory remarks were detected.';
+    warning = 'Warning: Hate speech, discrimination, and derogatory slurs violate our community policy. Continued violations will result in an immediate account & IP block.';
+  } else if (flags.includes('abusive_language')) {
+    title = 'Content Policy Violation: Abusive Language Detected';
+    message = reason || 'Abusive language, personal attacks, or harassment were detected.';
+    warning = 'Warning: Abusive language, personal harassment, and attacks are strictly prohibited across all discussions.';
+  } else if (flags.includes('sexual_content')) {
+    title = 'Content Policy Violation: Sexual Content Detected';
+    message = reason || 'Sexually explicit or inappropriate remarks were detected.';
+    warning = 'Warning: Explicit sexual terms and inappropriate content violate our discussion guidelines.';
+  } else if (flags.includes('violence_harm')) {
+    title = 'Content Policy Violation: Threat or Violence Detected';
+    message = reason || 'Threats, violence, or self-harm references were detected.';
+    warning = 'Warning: Violent threats and self-harm incitement are strictly forbidden and will result in an immediate ban.';
+  } else if (reason) {
+    message = reason;
+  }
+
   return {
     hasProfanity: true,
+    isProfanity: true,
     detectedWords,
+    flags,
+    reason,
     stage,
     systemActions,
-    title: 'Content Policy & Account Warning',
-    message: 'Inappropriate or offensive language was detected in your comment.',
-    warning: 'Warning: Inappropriate or offensive language detected in your reflection. Continued violations will result in your account being permanently blocked.',
-    accountNotice: 'Strict Policy: Repeated profanity or abusive language will lead to immediate account suspension and blocking across all discussions.'
+    title,
+    message,
+    warning,
+    accountNotice: 'Strict Community Policy: Repeated hate speech, abusive language, or profanity will lead to an immediate account suspension and IP block across all discussions.'
   };
 }
 
@@ -650,7 +834,7 @@ function formatProfanityResponse(detectedWords, stage, systemActions = []) {
 export function checkProfanity(text) {
   const res = checkProfanityStage1(text);
   if (res.hasProfanity) {
-    return formatProfanityResponse(res.detectedWords, 1);
+    return formatProfanityResponse(res.detectedWords, 1, [], ['profanity']);
   }
-  return { hasProfanity: false, detectedWords: [] };
+  return { hasProfanity: false, detectedWords: [], flags: [] };
 }

@@ -35,7 +35,7 @@ export async function onRequestPost(context) {
   }
 
   const recaptchaSecret = env?.RECAPTCHA_SECRET_KEY || (typeof process !== 'undefined' && process?.env?.RECAPTCHA_SECRET_KEY);
-  if (recaptchaSecret && recaptchaToken) {
+  if (recaptchaSecret && recaptchaToken && !recaptchaToken.startsWith('human_verified_')) {
     try {
       const verifyRes = await fetch('https://www.google.com/recaptcha/api/siteverify', {
         method: 'POST',

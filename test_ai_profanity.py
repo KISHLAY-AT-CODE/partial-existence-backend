@@ -49,11 +49,138 @@ def list_available_models(api_key):
             pass
     return "v1beta", []
 
+def query_groq_api(api_key, text):
+    """Sends content safety prompt to Groq API with category flags, repetition, and spacing detection."""
+    prompt = f"""You are an advanced content safety and moderation AI. Analyze if the following text contains any inappropriate content.
+
+CRITICAL DETECTION RULES:
+- Spacing Evasion & Letter Separation: Strictly look out for spaces, tabs, periods, or separators inserted between individual letters or characters in abusive words, slurs, or profanities (e.g. "b h e n c h o d", "f u c k", "b s d k", "m a d a r c h o d", "c u n t", "s h i t", "a s s h o l e", "g a n d u", "p u n d a", "l u n d"). Always inspect spaced-out sequences as single combined words.
+- Character Repetition & Stretched Words: Strictly look out for repeated characters and letters used to stretch, emphasize, or disguise abusive words, slurs, or profanities (e.g. "betichooooood", "bheeeeenchood", "fuuuuck", "looooser", "idiiooot", "shiiiiit", "aasssshole", "cuuunt").
+- Obfuscation & Evasion: Look out for symbols, punctuation, asterisks, dots, or numbers inserted inside bad words (e.g. "BHEEENCH%OOOIID", "F***uck", "f*ck", "b$dk", "a$$hole", "f.u.c.k", "b_h_e_n_c_h_o_d").
+- Multi-Language Abuse: Detect abusive words, insults, and harassment across English, Hindi, Hinglish, Tamil, Tanglish, and regional slang.
+
+CATEGORIES TO ANALYZE:
+1. Hateful speech (racism, casteism, religious hatred, xenophobia, misogyny, ethnic slurs, identity attacks, discrimination)
+2. Abusive language (personal attacks, harassment, hostility, insults, bullying, threats)
+3. Profanity & vulgarity (curse words, swearing, vulgar slang)
+4. Sexual content / violence / self-harm
+
+If ANY inappropriate content is found, respond ONLY with a valid JSON object in this format:
+{{"verdict": "DISAPPROVED", "flags": ["hate_speech", "abusive_language", "profanity", "sexual_content", "violence_harm"], "reason": "<short 1-line reason>"}}
+
+(Only include the specific flags that apply from: hate_speech, abusive_language, profanity, sexual_content, violence_harm)
+
+If completely clean, civil, and safe, respond ONLY with a valid JSON object:
+{{"verdict": "APPROVED", "flags": [], "reason": "Clean and safe"}}
+
+Text: \"\"\"{text}\"\"\""""
+
+    payload = {
+        "model": "qwen/qwen3.6-27b",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 150,
+        "response_format": {"type": "json_object"}
+    }
+
+    models = [
+        "qwen/qwen3.6-27b",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "allam-2-7b",
+        "groq/compound-mini"
+    ]
+    last_err = None
+
+    for model in models:
+        payload["model"] = model
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "PartialExistenceModerationBot/1.0 (Mozilla/5.0)"
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=6) as res:
+                body = res.read().decode('utf-8')
+                data = json.loads(body)
+                choice = data.get("choices", [{}])[0]
+                message = choice.get("message", {})
+                content = (message.get("content") or "").strip()
+                reasoning = (message.get("reasoning") or "").strip()
+
+                parsed = {}
+                try:
+                    parsed = json.loads(content)
+                except Exception:
+                    full_text = f"{content} {reasoning}".upper()
+                    parsed = {
+                        "verdict": "DISAPPROVED" if "DISAPPROVED" in full_text else "APPROVED",
+                        "flags": [],
+                        "reason": ""
+                    }
+                    if "HATE" in full_text: parsed["flags"].append("hate_speech")
+                    if "ABUSIVE" in full_text or "HARASS" in full_text: parsed["flags"].append("abusive_language")
+                    if "PROFAN" in full_text: parsed["flags"].append("profanity")
+
+                is_disapproved = parsed.get("verdict", "").upper() == "DISAPPROVED" or "DISAPPROVED" in f"{content} {reasoning}".upper()
+                verdict = "DISAPPROVED" if is_disapproved else "APPROVED"
+                flags = parsed.get("flags", [])
+                if is_disapproved and not flags:
+                    flags = ["inappropriate_content"]
+                reason = parsed.get("reason") or ("Violates content safety guidelines" if is_disapproved else "Clean")
+
+                return {
+                    "success": True,
+                    "model": f"Groq ({model})",
+                    "verdict": verdict,
+                    "flags": flags,
+                    "reason": reason,
+                    "raw": content if content else verdict
+                }
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8', errors='ignore')
+            last_err = f"HTTP {e.code}: {err_body[:180]}"
+            continue
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+    return {
+        "success": False,
+        "error": last_err or "Unknown Groq API error"
+    }
+
 def query_gemini_api(api_key, text):
-    """Sends ultra-low token content safety prompt to Gemini API (outputs only {"verdict": "APPROVED"/"DISAPPROVED"})."""
-    prompt = f"""You are a content safety moderation AI. Analyze if the following text contains any vulgarity, curse words, sexual insults, abusive slurs, profanity, or harassment in any language (English, Hindi, Hinglish, Tamil, etc.).
-If ANY profanity or offensive language is found, respond ONLY with: {{"verdict": "DISAPPROVED"}}
-If completely clean and safe, respond ONLY with: {{"verdict": "APPROVED"}}
+    """Sends content safety prompt to Gemini API with category flags, repetition, and spacing detection."""
+    prompt = f"""You are an advanced content safety and moderation AI. Analyze if the following text contains any inappropriate content.
+
+CRITICAL DETECTION RULES:
+- Spacing Evasion & Letter Separation: Strictly look out for spaces, tabs, periods, or separators inserted between individual letters or characters in abusive words, slurs, or profanities (e.g. "b h e n c h o d", "f u c k", "b s d k", "m a d a r c h o d", "c u n t", "s h i t", "a s s h o l e", "g a n d u", "p u n d a", "l u n d"). Always inspect spaced-out sequences as single combined words.
+- Character Repetition & Stretched Words: Strictly look out for repeated characters and letters used to stretch, emphasize, or disguise abusive words, slurs, or profanities (e.g. "betichooooood", "bheeeeenchood", "fuuuuck", "looooser", "idiiooot", "shiiiiit", "aasssshole", "cuuunt").
+- Obfuscation & Evasion: Look out for symbols, punctuation, asterisks, dots, or numbers inserted inside bad words (e.g. "BHEEENCH%OOOIID", "F***uck", "f*ck", "b$dk", "a$$hole", "f.u.c.k", "b_h_e_n_c_h_o_d").
+- Multi-Language Abuse: Detect abusive words, insults, and harassment across English, Hindi, Hinglish, Tamil, Tanglish, and regional slang.
+
+CATEGORIES TO ANALYZE:
+1. Hateful speech (racism, casteism, religious hatred, xenophobia, misogyny, ethnic slurs, identity attacks, discrimination)
+2. Abusive language (personal attacks, harassment, hostility, insults, bullying, threats)
+3. Profanity & vulgarity (curse words, swearing, vulgar slang)
+4. Sexual content / violence / self-harm
+
+If ANY inappropriate content is found, respond ONLY with a valid JSON object in this format:
+{{"verdict": "DISAPPROVED", "flags": ["hate_speech", "abusive_language", "profanity", "sexual_content", "violence_harm"], "reason": "<short 1-line reason>"}}
+
+(Only include the specific flags that apply from: hate_speech, abusive_language, profanity, sexual_content, violence_harm)
+
+If completely clean, civil, and safe, respond ONLY with a valid JSON object:
+{{"verdict": "APPROVED", "flags": [], "reason": "Clean and safe"}}
 
 Text: \"\"\"{text}\"\"\""""
 
@@ -61,7 +188,7 @@ Text: \"\"\"{text}\"\"\""""
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.0,
-            "maxOutputTokens": 16,
+            "maxOutputTokens": 100,
             "responseMimeType": "application/json"
         }
     }
@@ -83,14 +210,15 @@ Text: \"\"\"{text}\"\"\""""
                     body = res.read().decode('utf-8')
                     data = json.loads(body)
                     
-                    # Check if Gemini Safety Filters blocked the comment directly
                     prompt_feedback = data.get("promptFeedback", {})
                     if prompt_feedback.get("blockReason"):
                         return {
                             "success": True,
                             "model": f"{model} ({v})",
                             "verdict": "DISAPPROVED",
-                            "raw": f"Blocked by AI Safety Filter ({prompt_feedback.get('blockReason')})"
+                            "flags": ["hate_speech", "abusive_language"],
+                            "reason": f"Blocked by AI Safety Filter ({prompt_feedback.get('blockReason')})",
+                            "raw": "Blocked"
                         }
 
                     candidate = data.get("candidates", [{}])[0]
@@ -100,19 +228,35 @@ Text: \"\"\"{text}\"\"\""""
                             "success": True,
                             "model": f"{model} ({v})",
                             "verdict": "DISAPPROVED",
-                            "raw": f"Blocked by AI Safety Filter (finishReason: {finish_reason})"
+                            "flags": ["abusive_language", "hate_speech"],
+                            "reason": f"Blocked by AI Safety Filter (finishReason: {finish_reason})",
+                            "raw": "Blocked"
                         }
 
                     candidate_text = candidate.get("content", {}).get("parts", [{}])[0].get("text", "").strip()
-                    
-                    # Parse JSON or direct text
-                    is_disapproved = "DISAPPROVED" in candidate_text.upper()
+                    parsed = {}
+                    try:
+                        parsed = json.loads(candidate_text)
+                    except Exception:
+                        parsed = {
+                            "verdict": "DISAPPROVED" if "DISAPPROVED" in candidate_text.upper() else "APPROVED",
+                            "flags": [],
+                            "reason": ""
+                        }
+
+                    is_disapproved = parsed.get("verdict", "").upper() == "DISAPPROVED" or "DISAPPROVED" in candidate_text.upper()
                     verdict = "DISAPPROVED" if is_disapproved else "APPROVED"
+                    flags = parsed.get("flags", [])
+                    if is_disapproved and not flags:
+                        flags = ["inappropriate_content"]
+                    reason = parsed.get("reason") or ("Violates content safety guidelines" if is_disapproved else "Clean")
                     
                     return {
                         "success": True,
                         "model": f"{model} ({v})",
                         "verdict": verdict,
+                        "flags": flags,
+                        "reason": reason,
                         "raw": candidate_text if candidate_text else verdict
                     }
             except urllib.error.HTTPError as e:
@@ -131,6 +275,12 @@ Text: \"\"\"{text}\"\"\""""
         "error": last_err or "Unknown API error"
     }
 
+def query_ai_moderation(api_key, text):
+    """Automatically routes to Groq or Gemini based on key format."""
+    if api_key.startswith("gsk_"):
+        return query_groq_api(api_key, text)
+    return query_gemini_api(api_key, text)
+
 def check_text_against_keys(text, keys):
     """Checks text using primary key, only failing over to backup key on errors."""
     print("\n" + "=" * 65)
@@ -138,29 +288,33 @@ def check_text_against_keys(text, keys):
     print("=" * 65)
 
     for i, key in enumerate(keys, start=1):
-        key_type = "Primary Key" if i == 1 else f"Backup Key #{i}"
-        masked_key = key[:6] + "..." + key[-4:] if len(key) > 10 else "******"
-        print(f"\n[{key_type} ({masked_key})]: Requesting AI Verification (Low-Token Mode)...")
+        key_type = "Primary Key (PROFANITY_1)" if i == 1 else f"Backup Key #{i} (PROFANITY_{i})"
+        masked_key = key[:7] + "..." + key[-4:] if len(key) > 11 else "******"
+        provider = "Groq" if key.startswith("gsk_") else "Google Gemini"
+        print(f"\n[{key_type} | {provider} ({masked_key})]: Requesting AI Verification...")
         
-        result = query_gemini_api(key, text)
+        result = query_ai_moderation(key, text)
         if result["success"]:
             verdict = result["verdict"]
-            model = result.get("model", "gemini")
+            model = result.get("model", "ai-model")
+            flags = result.get("flags", [])
+            reason = result.get("reason", "")
             
             if verdict == "DISAPPROVED":
-                print(f"❌ STATUS: \033[91mDISAPPROVED (Profanity / Inappropriate Language Detected)\033[0m")
+                flag_str = ", ".join(flags) if flags else "inappropriate_content"
+                print(f"❌ STATUS: \033[91mDISAPPROVED\033[0m")
+                print(f"🚩 Triggered Flags: \033[93m[{flag_str}]\033[0m")
+                print(f"⚠️  Reason: {reason}")
             else:
                 print(f"✅ STATUS: \033[92mAPPROVED (Clean & Safe Content)\033[0m")
                 
             print(f"🤖 Model Used: {model}")
-            print(f"⚡ Token Footprint: Ultra-Low (1-Word Direct Response: {result['raw']})")
+            print(f"⚡ Raw Response: {result['raw']}")
             return
         else:
             print(f"⚠️  {key_type} Error: \033[93m{result['error']}\033[0m")
             if i < len(keys):
-                print("   -> Failing over to backup key...")
-
-    print("\n❌ All configured API keys failed or were rate-limited.")
+                print("   -> Failing over to next key...")
 
     print("\n❌ All configured API keys failed or were rate-limited.")
 
@@ -171,15 +325,16 @@ def main():
     env_vars = load_env(env_file)
     key1 = env_vars.get("PROFANITY_1") or os.environ.get("PROFANITY_1", "").strip()
     key2 = env_vars.get("PROFANITY_2") or os.environ.get("PROFANITY_2", "").strip()
+    key3 = env_vars.get("PROFANITY_3") or os.environ.get("PROFANITY_3", "").strip()
     
-    keys = [k for k in [key1, key2] if k]
+    keys = [k for k in [key1, key2, key3] if k]
     
     if not keys:
-        print("❌ Error: No PROFANITY_1 or PROFANITY_2 keys found in .env file.")
+        print("❌ Error: No PROFANITY_1, PROFANITY_2, or PROFANITY_3 keys found in .env file.")
         print(f"   Looked in: {env_file}")
         sys.exit(1)
         
-    print(f"🛡️  AI Profanity & Content Safety Tester")
+    print(f"🛡️  AI Profanity & Content Safety Tester (Groq & Gemini)")
     print(f"Loaded {len(keys)} API Key(s) from: {env_file.name}")
     
     # If passed as command line argument
@@ -205,3 +360,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
