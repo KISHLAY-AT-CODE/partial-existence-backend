@@ -181,6 +181,7 @@ export async function onRequestPost(context) {
           success: false,
           isProfanity: true,
           stage: profanityResult.stage,
+          systemActions: profanityResult.systemActions || [],
           title: profanityResult.title || 'Content Policy & Account Warning',
           message: profanityResult.message || 'Inappropriate or offensive language was detected in your comment.',
           warning:
@@ -231,6 +232,7 @@ export async function onRequestPost(context) {
       {
         success: true,
         message: 'Reflection posted successfully.',
+        systemActions: profanityResult.systemActions || [],
         comment: {
           id: commentId,
           slug,

@@ -203,65 +203,60 @@ function getAiApiKeys(env) {
 }
 
 /**
- * Calls Gemini / AI Content Moderation endpoint with a specific key
+ * Calls Gemini / AI Content Moderation endpoint with a specific key (Ultra-low token footprint)
  */
 async function callAiModerationEndpoint(apiKey, text) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s timeout
 
   try {
-    const prompt = `You are an automated content moderation classifier for a blog comments system.
-Evaluate if the following comment contains offensive language, severe profanity, hate speech, vulgar sexual terms, slurs, or harassment in any language (English, Hindi, Hinglish, Tamil, Tanglish, etc.).
-Respond ONLY with a valid JSON object matching this schema:
-{
-  "isProfane": true or false,
-  "offensiveWords": ["word1", "word2"],
-  "reason": "short explanation"
-}
+    const prompt = `Evaluate if this comment contains profanity, hate speech, vulgarity, or abuse in any language.
+Respond with JSON: {"verdict": "APPROVED"} or {"verdict": "DISAPPROVED"}.
 
 Comment: """${text.replace(/"/g, '\\"')}"""`;
 
-    // Try gemini-2.0-flash or gemini-1.5-flash
-    let response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 200,
-            responseMimeType: 'application/json'
-          }
-        })
-      }
-    );
+    // Try models in order: gemini-flash-latest, gemini-2.0-flash, gemini-1.5-flash-latest
+    const candidateModels = ['gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-pro'];
+    let response = null;
+    let lastErrText = '';
 
-    if (!response.ok && response.status === 404) {
-      response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 200
-            }
-          })
+    for (const model of candidateModels) {
+      try {
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.0,
+                maxOutputTokens: 16,
+                responseMimeType: 'application/json'
+              }
+            })
+          }
+        );
+
+        if (response.ok) {
+          break;
+        } else if (response.status === 404) {
+          continue;
+        } else {
+          lastErrText = await response.text().catch(() => '');
+          break;
         }
-      );
+      } catch (err) {
+        if (controller.signal.aborted) throw err;
+        lastErrText = err.message;
+      }
     }
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      throw new Error(`AI API HTTP ${response.status}: ${errText.slice(0, 100)}`);
+    if (!response || !response.ok) {
+      throw new Error(`AI API error: ${lastErrText.slice(0, 120)}`);
     }
 
     const data = await response.json();
@@ -274,13 +269,13 @@ Comment: """${text.replace(/"/g, '\\"')}"""`;
       throw new Error('Empty AI response candidate');
     }
 
-    // Parse JSON
-    const parsed = JSON.parse(candidateText.replace(/```json/g, '').replace(/```/g, '').trim());
+    const cleanVerdict = candidateText.trim().toUpperCase();
+    const isProfane = cleanVerdict.includes('DISAPPROVED');
+
     return {
       success: true,
-      isProfane: Boolean(parsed.isProfane),
-      offensiveWords: Array.isArray(parsed.offensiveWords) ? parsed.offensiveWords : [],
-      reason: parsed.reason || ''
+      isProfane,
+      verdict: isProfane ? 'DISAPPROVED' : 'APPROVED'
     };
   } catch (err) {
     clearTimeout(timeoutId);
@@ -289,7 +284,7 @@ Comment: """${text.replace(/"/g, '\\"')}"""`;
 }
 
 /**
- * STAGE 2: AI Verification with key rotation and graceful skip on error
+ * STAGE 2: AI Verification with primary key priority and failover-only rotation
  * @param {string} text
  * @param {object} env - Cloudflare env or process.env container
  * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage: number, skipped?: boolean }>}
@@ -302,24 +297,16 @@ export async function checkProfanityStage2(text, env = {}) {
     return { hasProfanity: false, detectedWords: [], stage: 2, skipped: true };
   }
 
-  // Rotate starting key index to balance load
-  const startIndex = aiKeyRotationIndex % keys.length;
-  aiKeyRotationIndex = (aiKeyRotationIndex + 1) % keys.length;
-
-  const candidateKeys = [
-    keys[startIndex],
-    ...keys.filter((_, idx) => idx !== startIndex)
-  ];
-
-  for (let i = 0; i < candidateKeys.length; i++) {
-    const key = candidateKeys[i];
+  // Use primary key first; only failover to secondary key on errors (saves tokens & rate limits)
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
     try {
       const result = await callAiModerationEndpoint(key, text);
       if (result.success && result.isProfane) {
         return {
           hasProfanity: true,
-          detectedWords: result.offensiveWords.length > 0 ? result.offensiveWords : ['ai_detected_abuse'],
-          reason: result.reason,
+          detectedWords: ['ai_flagged_content'],
+          verdict: 'DISAPPROVED',
           stage: 2
         };
       }
@@ -327,11 +314,11 @@ export async function checkProfanityStage2(text, env = {}) {
       return {
         hasProfanity: false,
         detectedWords: [],
+        verdict: 'APPROVED',
         stage: 2
       };
     } catch (err) {
-      console.warn(`[Profanity Stage 2] AI Key attempt ${i + 1}/${candidateKeys.length} failed:`, err.message);
-      // Try next key in rotation loop
+      console.warn(`[Profanity Stage 2] Primary Key #${i + 1} failed: ${err.message}. Failing over to backup key...`);
     }
   }
 
@@ -505,8 +492,11 @@ export async function checkProfanityStage3(text, db, isMongo = false) {
  * @returns {Promise<{ hasProfanity: boolean, detectedWords: string[], stage?: number, title?: string, message?: string, warning?: string, accountNotice?: string }>}
  */
 export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo = false } = {}) {
+  const systemActions = [];
+  systemActions.push('Multi-layer profanity filtering system initialized');
+
   if (!text || typeof text !== 'string') {
-    return { hasProfanity: false, detectedWords: [] };
+    return { hasProfanity: false, detectedWords: [], systemActions };
   }
 
   // Ensure DB table/collection exists if DB is provided
@@ -515,52 +505,70 @@ export async function detectProfanity3Stage(text, { env = {}, db = null, isMongo
   }
 
   // --- STAGE 1: IN-MEMORY DICTIONARY MATCH ---
+  systemActions.push('Running Stage 1: Fast pattern & dictionary scan (EN, HI, Hinglish, TA)...');
   const stage1Result = checkProfanityStage1(text);
   if (stage1Result.hasProfanity) {
-    return formatProfanityResponse(stage1Result.detectedWords, 1);
+    systemActions.push('Stage 1 violation: Inappropriate keywords detected in dictionary');
+    return formatProfanityResponse(stage1Result.detectedWords, 1, systemActions);
   }
+  systemActions.push('Stage 1 passed: No baseline dictionary profanity found');
 
   // --- STAGE 2: AI API VERIFICATION WITH ROTATION ---
   try {
+    systemActions.push('Stage 2: AI profanity detection initiated...');
     const stage2Result = await checkProfanityStage2(text, env);
-    if (stage2Result.hasProfanity) {
+    if (stage2Result.skipped) {
+      systemActions.push('AI detection skipped gracefully, moving to Stage 3');
+    } else if (stage2Result.hasProfanity) {
+      systemActions.push('Stage 2 violation: AI safety model flagged inappropriate content');
       // Cache detected offensive words in database for future Stage 3 lookups
       if (db) {
         await cacheProfanityWords(stage2Result.detectedWords, db, isMongo).catch(() => {});
       }
-      return formatProfanityResponse(stage2Result.detectedWords, 2);
+      return formatProfanityResponse(stage2Result.detectedWords, 2, systemActions);
+    } else {
+      systemActions.push('Stage 2 passed: AI safety model approved content');
     }
   } catch (err) {
+    systemActions.push(`Error in AI detection (${err.message?.slice(0, 40) || 'unknown'}), skipping stage 2`);
     console.warn('[Profanity 3-Stage] Skipping Stage 2 gracefully due to unexpected error:', err.message);
   }
 
   // --- STAGE 3: DATABASE-CACHED PROFANITY WORDS ---
   if (db) {
     try {
+      systemActions.push('Stage 3: Database cached profanity verification...');
       const stage3Result = await checkProfanityStage3(text, db, isMongo);
       if (stage3Result.hasProfanity) {
-        return formatProfanityResponse(stage3Result.detectedWords, 3);
+        systemActions.push('Stage 3 violation: Content matched dynamically learned profanity cache');
+        return formatProfanityResponse(stage3Result.detectedWords, 3, systemActions);
       }
+      systemActions.push('Stage 3 passed: Database cache clean');
     } catch (err) {
+      systemActions.push('Stage 3 check skipped due to database lookup error');
       console.warn('[Profanity 3-Stage] Stage 3 error:', err.message);
     }
   }
 
+  systemActions.push('All safety stages passed: Comment approved for publication');
+
   // All 3 stages passed cleanly
   return {
     hasProfanity: false,
-    detectedWords: []
+    detectedWords: [],
+    systemActions
   };
 }
 
 /**
  * Standard profanity violation response payload
  */
-function formatProfanityResponse(detectedWords, stage) {
+function formatProfanityResponse(detectedWords, stage, systemActions = []) {
   return {
     hasProfanity: true,
     detectedWords,
     stage,
+    systemActions,
     title: 'Content Policy & Account Warning',
     message: 'Inappropriate or offensive language was detected in your comment.',
     warning: 'Warning: Inappropriate or offensive language detected in your reflection. Continued violations will result in your account being permanently blocked.',

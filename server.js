@@ -234,7 +234,7 @@ const server = http.createServer(async (req, res) => {
     // 1. Register: POST /api/auth/register
     if (pathname === '/api/auth/register' && req.method === 'POST') {
       const body = await parseBody(req);
-      const { name, email, password, websiteId: targetWeb = websiteId } = body;
+      const { name, email, password, recaptchaToken, websiteId: targetWeb = websiteId } = body;
 
       if (!name || typeof name !== 'string' || name.trim().length < 2) {
         return sendError(res, 'Name must be at least 2 characters long', 400, origin);
@@ -244,6 +244,13 @@ const server = http.createServer(async (req, res) => {
       }
       if (!password || typeof password !== 'string' || password.length < 6) {
         return sendError(res, 'Password must be at least 6 characters long', 400, origin);
+      }
+
+      if (process.env.RECAPTCHA_SECRET_KEY && recaptchaToken) {
+        const isHuman = await verifyRecaptcha(recaptchaToken);
+        if (!isHuman) {
+          return sendError(res, 'reCAPTCHA verification failed. Please complete the captcha.', 400, origin);
+        }
       }
 
       const cleanEmail = email.trim().toLowerCase();

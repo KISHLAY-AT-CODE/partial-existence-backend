@@ -20,7 +20,7 @@ export async function onRequestPost(context) {
     return errorResponse('Invalid JSON body', 400, request, env);
   }
 
-  const { name, email, password, websiteId = 'partial-existence' } = body;
+  const { name, email, password, recaptchaToken, websiteId = 'partial-existence' } = body;
 
   if (!name || typeof name !== 'string' || name.trim().length < 2) {
     return errorResponse('Name must be at least 2 characters long', 400, request, env);
@@ -32,6 +32,23 @@ export async function onRequestPost(context) {
 
   if (!password || typeof password !== 'string' || password.length < 6) {
     return errorResponse('Password must be at least 6 characters long', 400, request, env);
+  }
+
+  const recaptchaSecret = env?.RECAPTCHA_SECRET_KEY || (typeof process !== 'undefined' && process?.env?.RECAPTCHA_SECRET_KEY);
+  if (recaptchaSecret && recaptchaToken) {
+    try {
+      const verifyRes = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `secret=${encodeURIComponent(recaptchaSecret)}&response=${encodeURIComponent(recaptchaToken)}`
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyData.success) {
+        return errorResponse('reCAPTCHA verification failed. Please complete the captcha.', 400, request, env);
+      }
+    } catch (err) {
+      console.warn('[reCAPTCHA] Verification check warning:', err.message);
+    }
   }
 
   const cleanName = name.trim().slice(0, 50);
