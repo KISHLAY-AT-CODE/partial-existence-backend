@@ -615,13 +615,16 @@ const server = http.createServer(async (req, res) => {
           }
         }
 
-        // 2. Rate Limit: Maximum 3 comments per user on this specific blog website
+        // 2. Rate Limit: Maximum 3 comments per user on this specific blog website per 24 hours
         const websiteDoc = await websitesCol.findOne({ websiteId });
         let userCommentCount = 0;
+        const oneDayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
         if (websiteDoc?.posts) {
           for (const post of Object.values(websiteDoc.posts)) {
             if (Array.isArray(post.comments)) {
               for (const c of post.comments) {
+                const commentTime = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+                if (commentTime < oneDayAgoMs) continue;
                 const matchUser = authUser && c.userId === authUser.userId;
                 const matchToken = authorToken && c.authorToken === authorToken;
                 const matchIp = c.ip && c.ip === clientIp;
@@ -636,7 +639,7 @@ const server = http.createServer(async (req, res) => {
         if (userCommentCount >= 3) {
           return sendError(
             res,
-            'You have reached the maximum limit of 3 comments for this blog website.',
+            'You have reached the maximum limit of 3 comments per 24 hours for this blog website.',
             429,
             origin
           );

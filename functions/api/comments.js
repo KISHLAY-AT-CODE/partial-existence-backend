@@ -184,14 +184,17 @@ export async function onRequestPost(context) {
       return errorResponse('You have been blocked from commenting on this blog by the blog owner.', 403, request, env);
     }
 
-    // 3. Rate Limit: Maximum 3 comments per user on this specific blog website
+    // 3. Rate Limit: Maximum 3 comments per user on this specific blog website per 24 hours
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const userComments = await db
-      .prepare('SELECT COUNT(*) as count FROM comments WHERE website_id = ? AND (user_id = ? OR author_token = ?)')
-      .bind(websiteId, authUser.userId, authUser.userId)
+      .prepare(
+        'SELECT COUNT(*) as count FROM comments WHERE website_id = ? AND (user_id = ? OR author_token = ?) AND created_at >= ?'
+      )
+      .bind(websiteId, authUser.userId, authUser.userId, oneDayAgo)
       .first();
 
     if (userComments && userComments.count >= 3) {
-      return errorResponse('You have reached the maximum limit of 3 comments for this blog website.', 429, request, env);
+      return errorResponse('You have reached the maximum limit of 3 comments per 24 hours for this blog website.', 429, request, env);
     }
 
     // 4. 3-Stage Multi-Language & AI Profanity Shield
